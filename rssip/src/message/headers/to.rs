@@ -5,7 +5,7 @@ use std::str::{
 
 use crate::error::Result;
 use crate::macros;
-use crate::message::param::{Params, TAG_PARAM};
+use crate::message::params::{Params, TAG_PARAM};
 use crate::message::uri::SipUri;
 use crate::parser::{HeaderParse, SipParser};
 

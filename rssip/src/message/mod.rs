@@ -4,7 +4,7 @@ pub mod auth;
 pub mod headers;
 pub mod media_type;
 pub mod method;
-pub mod param;
+pub mod params;
 pub mod status_code;
 pub mod uri;
 

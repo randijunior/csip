@@ -2,7 +2,7 @@ use std::{fmt, str};
 
 use crate::error::Result;
 use crate::macros::{self};
-use crate::message::param::Params;
+use crate::message::params::Params;
 use crate::parser::{HeaderParse, SipParser};
 
 const PURPOSE: &str = "purpose";

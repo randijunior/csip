@@ -3,7 +3,7 @@ use std::str::{self, FromStr};
 
 use crate::error::Result;
 use crate::macros;
-use crate::message::param::{self, Params};
+use crate::message::params::{self, Params};
 use crate::message::uri::SipUri;
 use crate::parser::{HeaderParse, SipParser};
 
@@ -23,7 +23,7 @@ impl HeaderParse for From {
         let mut tag = None;
         let params = macros::parse_params!(parser, {
             let (pname, pvalue) = parser.param_ref()?;
-            if pname == param::TAG_PARAM {
+            if pname == params::TAG_PARAM {
                 tag = pvalue.map(ToOwned::to_owned);
                 None
             } else {

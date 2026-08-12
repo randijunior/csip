@@ -8,7 +8,7 @@ use utils::{lookup_table, scanner};
 
 use crate::error::{Error, ParseError, ParseErrorKind as Kind, Result};
 use crate::message::headers::{self as header, Header};
-use crate::message::{self, auth, method, param, status_code, uri};
+use crate::message::{self, auth, method, params, status_code, uri};
 use crate::{macros, transport};
 
 #[must_use]
@@ -415,33 +415,33 @@ impl<'buf> SipParser<'buf> {
             let (pname, pvalue) = self.parse_uri_param()?;
 
             match pname {
-                param::USER_PARAM => {
+                params::USER_PARAM => {
                     uri.user_param = pvalue.map(ToOwned::to_owned);
                     None
                 }
-                param::METHOD_PARAM => {
+                params::METHOD_PARAM => {
                     uri.method_param = pvalue.map(method::SipMethod::from);
                     None
                 }
-                param::TRANSPORT_PARAM => {
+                params::TRANSPORT_PARAM => {
                     uri.transport_param = pvalue
                         .map(transport::TransportProtocol::from_str)
                         .transpose()
                         .or_else(|_| self.error(Kind::Transport))?;
                     None
                 }
-                param::TTL_PARAM => {
+                params::TTL_PARAM => {
                     uri.ttl_param = pvalue
                         .map(|ttl| ttl.parse())
                         .transpose()
                         .or_else(|_| self.error(Kind::Param))?;
                     None
                 }
-                param::LR_PARAM => {
+                params::LR_PARAM => {
                     uri.lr_param = true;
                     None
                 }
-                param::MADDR_PARAM => {
+                params::MADDR_PARAM => {
                     uri.maddr_param = pvalue
                         .map(|maddr| maddr.parse::<uri::Host>())
                         .transpose()
@@ -655,7 +655,7 @@ impl<'buf> SipParser<'buf> {
 
         Ok(auth::Challenge::Other {
             scheme: scheme.to_owned(),
-            param: params,
+            params,
         })
     }
 
@@ -843,25 +843,25 @@ impl<'buf> SipParser<'buf> {
         Ok((name, Some(value)))
     }
 
-    pub fn parse_param(&mut self) -> Result<param::Param> {
+    pub fn parse_param(&mut self) -> Result<params::Param> {
         Ok(self.param_ref()?.into())
     }
 
-    pub fn param_ref(&mut self) -> Result<param::ParamRef<'buf>> {
+    pub fn param_ref(&mut self) -> Result<params::ParamRef<'buf>> {
         unsafe { self.param_ref_unchecked(is_token) }
     }
 
     #[inline]
-    fn parse_uri_header(&mut self) -> Result<param::Param> {
+    fn parse_uri_header(&mut self) -> Result<params::Param> {
         Ok(unsafe { self.param_ref_unchecked(is_hdr_uri)?.into() })
     }
 
-    fn parse_uri_param(&mut self) -> Result<param::ParamRef<'buf>> {
+    fn parse_uri_param(&mut self) -> Result<params::ParamRef<'buf>> {
         unsafe { self.param_ref_unchecked(is_param) }
     }
 
     #[inline]
-    pub fn via_param(&mut self) -> Result<param::ParamRef<'buf>> {
+    pub fn via_param(&mut self) -> Result<params::ParamRef<'buf>> {
         unsafe { self.param_ref_unchecked(is_via_param) }
     }
 }

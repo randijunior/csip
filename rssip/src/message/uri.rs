@@ -2,7 +2,7 @@ use std::{borrow, fmt, net, ops, str};
 
 use crate::error;
 use crate::message::method::SipMethod;
-use crate::message::param::{Param, Params};
+use crate::message::params::{Param, Params};
 use crate::parser::SipParser;
 use crate::transport::TransportProtocol;
 

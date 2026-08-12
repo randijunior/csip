@@ -1,7 +1,7 @@
 //! SIP Auth types
 use std::fmt;
 
-use crate::message::param::Params;
+use crate::message::params::Params;
 
 pub const CNONCE: &str = "cnonce";
 pub const QOP: &str = "qop";
@@ -33,7 +33,7 @@ pub struct DigestChallenge {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Challenge {
     Digest(DigestChallenge),
-    Other { scheme: String, param: Params },
+    Other { scheme: String, params: Params },
 }
 
 impl fmt::Display for Challenge {
@@ -75,7 +75,7 @@ impl fmt::Display for Challenge {
             }
             Challenge::Other {
                 scheme: _,
-                param: _,
+                params: _,
             } => todo!(),
         }
     }

@@ -2,7 +2,7 @@ use core::fmt;
 
 use crate::error::Result;
 use crate::macros;
-use crate::message::param::Params;
+use crate::message::params::Params;
 use crate::parser::{HeaderParse, SipParser};
 
 #[derive(Debug, PartialEq, Eq, Clone)]

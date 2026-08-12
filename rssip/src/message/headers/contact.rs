@@ -2,7 +2,7 @@ use core::fmt;
 
 use crate::error::Result;
 use crate::macros;
-use crate::message::param::{EXPIRES_PARAM, Params, Q, Q_PARAM};
+use crate::message::params::{EXPIRES_PARAM, Params, Q, Q_PARAM};
 use crate::message::uri::SipUri;
 use crate::parser::{HeaderParse, SipParser};
 

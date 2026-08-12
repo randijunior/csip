@@ -2,7 +2,7 @@ use std::fmt;
 
 use crate::error::Result;
 use crate::macros;
-use crate::message::param::Params;
+use crate::message::params::Params;
 use crate::parser::SipParser;
 
 /// The `media-type` that appears in `Accept` and

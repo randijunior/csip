@@ -4,7 +4,7 @@ use std::str::{self, FromStr};
 
 use crate::error::{ParseErrorKind as ErrorKind, Result};
 use crate::macros;
-use crate::message::param::{self, Params};
+use crate::message::params::{self, Params};
 use crate::message::uri::{Host, HostPort};
 use crate::parser::{HeaderParse, SIPV2, SipParser};
 use crate::transport::TransportProtocol;
@@ -73,32 +73,32 @@ impl HeaderParse for Via {
         via.params = macros::parse_params!(parser, {
             let (pname, pvalue) = parser.via_param()?;
             match pname {
-                param::BRANCH_PARAM => {
+                params::BRANCH_PARAM => {
                     via.branch = pvalue.map(ToOwned::to_owned);
                     None
                 }
-                param::TTL_PARAM => {
+                params::TTL_PARAM => {
                     via.ttl = pvalue
                         .map(|p| p.parse())
                         .transpose()
                         .or_else(|_| parser.error(ErrorKind::Param))?;
                     None
                 }
-                param::MADDR_PARAM => {
+                params::MADDR_PARAM => {
                     via.maddr = pvalue
                         .map(|maddr| maddr.parse())
                         .transpose()
                         .or_else(|_| parser.error(ErrorKind::Host))?;
                     None
                 }
-                param::RECEIVED_PARAM => {
+                params::RECEIVED_PARAM => {
                     via.received = pvalue
                         .map(|p| p.parse())
                         .transpose()
                         .or_else(|_| parser.error(ErrorKind::Param))?;
                     None
                 }
-                param::RPORT_PARAM => {
+                params::RPORT_PARAM => {
                     via.rport = if let Some(rport) = pvalue
                         .filter(|rport| !rport.is_empty())
                         .map(|rport| rport.parse())

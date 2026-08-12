@@ -8,7 +8,7 @@ use crate::core::endpoint::{self, ToTake};
 use crate::error::{Error, Result};
 use crate::message::headers::{CSeq, CallId, Contact, From, Header, Headers, MaxForwards, To};
 use crate::message::method::SipMethod;
-use crate::message::param::Params;
+use crate::message::params::Params;
 use crate::message::status_code::StatusCode;
 use crate::message::uri::{Scheme, SipUri, Uri};
 use crate::message::{ReasonPhrase, Request, RequestLine, SipBody};

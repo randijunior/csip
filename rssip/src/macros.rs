@@ -4,7 +4,7 @@ macro_rules! parse_params {
     };
 
     ($parser:expr, $func:block) => {{
-        let mut params = $crate::message::param::Params::default();
+        let mut params = $crate::message::params::Params::default();
         $parser.skip_ws();
         while $parser.take_if_eq(b';').is_some() {
             if let Some(param) = $func {

@@ -5,7 +5,7 @@ use itertools::Itertools;
 
 use crate::error::Result;
 use crate::macros;
-use crate::message::param::{self, Params, Q};
+use crate::message::params::{self, Params, Q};
 use crate::parser::{HeaderParse, SipParser};
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -29,7 +29,7 @@ impl HeaderParse for AcceptEncoding {
             let params = macros::parse_params!(parser, {
                 let (pname, pvalue) = parser.param_ref()?;
 
-                if pname == param::Q_PARAM {
+                if pname == params::Q_PARAM {
                     q_param = pvalue.map(Q::from_str).transpose()?;
 
                     None
