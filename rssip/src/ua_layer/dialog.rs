@@ -6,15 +6,18 @@ use tokio::time;
 
 use crate::core::endpoint::{self, ToTake};
 use crate::error::{Error, Result};
-use crate::message::ReasonPhrase;
-use crate::message::headers::{CallId, Contact, From, Header, Headers, To};
+use crate::message::headers::{CSeq, CallId, Contact, From, Header, Headers, MaxForwards, To};
 use crate::message::method::SipMethod;
 use crate::message::param::Params;
 use crate::message::status_code::StatusCode;
-use crate::message::uri::{Scheme, Uri};
-use crate::transaction::{Role, ServerTransaction, timers};
+use crate::message::uri::{Scheme, SipUri, Uri};
+use crate::message::{ReasonPhrase, Request, RequestLine, SipBody};
+use crate::transaction::{ClientTransaction, Role, ServerTransaction, timers};
 use crate::transport::incoming::{IncomingMessage, IncomingRequest};
-use crate::{Endpoint, IncomingResponse, OutgoingResponse, find_map_header, find_map_mut_header};
+use crate::{
+    Endpoint, IncomingResponse, OutgoingRequest, OutgoingResponse, find_map_header,
+    find_map_mut_header, headers,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DialogState {
@@ -27,7 +30,7 @@ pub enum DialogState {
 pub struct Dialog {
     dialog_id: DialogId,
     state: DialogState,
-    remote_cseq: u32,
+    remote_cseq: Option<u32>,
     local_cseq: Option<u32>,
     from: From,
     to: To,
@@ -35,6 +38,7 @@ pub struct Dialog {
     secure: bool,
     route_set: Vec<RouteSet>,
     role: Role,
+    method: SipMethod,
     receiver: mpsc::Receiver<IncomingMessage>,
     endpoint: Endpoint,
 }
@@ -61,7 +65,7 @@ impl Dialog {
         let dialog_id = DialogId {
             call_id: mandatory_headers.call_id.clone(),
             remote_tag: mandatory_headers.from.tag().map(|t| t.to_owned()),
-            local_tag: crate::generate_tag_n(8),
+            local_tag: crate::generate_tag(),
         };
 
         let (sender, receiver) = mpsc::channel(10);
@@ -71,8 +75,9 @@ impl Dialog {
             .register_dialog(dialog_id.clone(), sender);
 
         let dialog = Dialog {
+            method: request.req_line.method,
             dialog_id,
-            remote_cseq: mandatory_headers.cseq.cseq(),
+            remote_cseq: Some(mandatory_headers.cseq.cseq()),
             local_cseq: None,
             from: mandatory_headers.from.clone(),
             to: mandatory_headers.to.clone(),
@@ -87,6 +92,91 @@ impl Dialog {
         };
 
         Ok(dialog)
+    }
+
+    // RFC 3261 12.1.2.
+    pub fn create_uac(
+        method: SipMethod,
+        remote_target: Uri,
+        local_uri: SipUri,
+        remote_uri: SipUri,
+        endpoint: Endpoint,
+    ) -> Result<Dialog> {
+        if !method.can_establish_dialog() {
+            return Err(Error::Dialog(format!(
+                "The sip method '{}' cannot establish a dialog",
+                method
+            )));
+        }
+        let secure = remote_target.scheme == Scheme::Sips;
+        let from_tag = crate::generate_tag();
+        let cseq_num = rand::random();
+        let call_id = CallId::new(crate::random_str(22));
+        let from = From {
+            uri: local_uri.clone(),
+            tag: Some(from_tag.clone()),
+            params: Default::default(),
+        };
+        let to = To {
+            uri: remote_uri,
+            tag: None,
+            params: Default::default(),
+        };
+        let contact = Contact {
+            uri: local_uri,
+            q: None,
+            expires: None,
+            param: Params::default(),
+        };
+
+        let dialog_id = DialogId {
+            call_id,
+            local_tag: from_tag, // MUST be set to the tag in the From field in the request
+            remote_tag: None,    // MUST be set to the tag in the To field of the response
+        };
+
+        let (sender, receiver) = mpsc::channel(10);
+
+        endpoint
+            .ua_plugin()
+            .register_dialog(dialog_id.clone(), sender);
+
+        let dialog = Dialog {
+            method,
+            dialog_id,
+            remote_cseq: None,
+            local_cseq: Some(cseq_num),
+            from,
+            to,
+            secure,
+            route_set: vec![],
+            state: DialogState::Initial,
+            role: Role::Uac,
+            contact,
+            receiver,
+            endpoint,
+        };
+
+        Ok(dialog)
+    }
+
+    pub fn create_request(&mut self) -> Request {
+        let local_cseq_num = self.local_cseq.get_or_insert(rand::random());
+        let request = Request {
+            req_line: RequestLine {
+                method: self.method,
+                uri: self.contact.uri.uri().clone(),
+            },
+            headers: headers! {
+                Header::From(self.from.clone()),
+                Header::To(self.to.clone()),
+                Header::CallId(self.dialog_id.call_id.clone()),
+                Header::CSeq(CSeq::new(*local_cseq_num, self.method)),
+                Header::MaxForwards(MaxForwards::new(70))
+            },
+            body: None,
+        };
+        request
     }
 
     pub async fn provisional_response(
@@ -158,7 +248,7 @@ impl Dialog {
         response
     }
 
-    pub(super) async fn recv(&mut self) -> Result<IncomingMessage> {
+    pub(super) async fn receive(&mut self) -> Result<IncomingMessage> {
         let Some(msg) = self.receiver.recv().await else {
             return Err(Error::ChannelClosed);
         };
@@ -170,9 +260,9 @@ impl Dialog {
         Ok(msg)
     }
 
-    pub(super) async fn recv_request(&mut self) -> Result<IncomingRequest> {
+    pub(super) async fn receive_request(&mut self) -> Result<IncomingRequest> {
         loop {
-            if let IncomingMessage::Request(req) = self.recv().await? {
+            if let IncomingMessage::Request(req) = self.receive().await? {
                 return Ok(req);
             }
             continue;
@@ -182,7 +272,7 @@ impl Dialog {
     pub async fn wait_for_ack(&mut self) -> Result<IncomingRequest> {
         let ack_timer = timers::T1 * 64;
         loop {
-            match time::timeout(ack_timer, self.recv_request())
+            match time::timeout(ack_timer, self.receive_request())
                 .await
                 .map_err(|_elapsed| Error::Other("No ACK received".into()))??
             {
@@ -206,7 +296,8 @@ impl Dialog {
         let request_cseq = request.incoming_info.mandatory_headers.cseq.cseq();
         let method = request.req_line.method;
 
-        if !matches!(method, SipMethod::Cancel | SipMethod::Ack) && request_cseq <= self.remote_cseq
+        if !matches!(method, SipMethod::Cancel | SipMethod::Ack)
+            && request_cseq <= self.remote_cseq.unwrap_or(0)
         {
             let mut response = self.endpoint.create_outgoing_response(
                 request,
@@ -217,7 +308,7 @@ impl Dialog {
             return Ok(());
         }
 
-        self.remote_cseq = request_cseq;
+        self.remote_cseq = Some(request_cseq);
 
         // RFC3261 12.2.2.
         // When a UAS receives a target refresh request, it MUST replace the
@@ -230,6 +321,10 @@ impl Dialog {
         }
 
         Ok(())
+    }
+
+    pub(crate) fn endpoint(&self) -> &Endpoint {
+        &self.endpoint
     }
 }
 
@@ -359,5 +454,36 @@ impl RouteSet {
                 }
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::*;
+    #[tokio::test]
+    async fn dialog_uac_simple_create() {
+        let endpoint = crate::test_utils::create_test_endpoint().await;
+        let target = Uri::from_str("sip:localhost").unwrap();
+        let local_uri = SipUri::from_str("sip:localhost:9090").unwrap();
+
+        // let dialog = Dialog::create_uac(
+        //     SipMethod::Invite,
+        //     target.clone(),
+        //     local_uri,
+        //     SipUri::Uri(target),
+        //     endpoint,
+        // ).unwrap();
+        // let request = dialog.create_request();
+        // dialog.send_request(request);
+
+        // let builder = DialogClientBuilder::new()
+        // .method(SipMethod::Invite)
+        // .target(target.clone())
+        // .local_uri(local_uri)
+        // .remote_uri(SipUri::Uri(target));
+
+        // let dialog = Dialog::create_uac(request, endpoint.clone()).await.unwrap();
     }
 }

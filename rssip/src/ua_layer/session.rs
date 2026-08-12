@@ -8,10 +8,10 @@ use tokio::sync::mpsc;
 use crate::message::headers::Contact;
 use crate::message::method::SipMethod;
 use crate::message::status_code::StatusCode;
-use crate::message::{ReasonPhrase, SipBody};
-use crate::transaction::ServerTransaction;
+use crate::message::{ReasonPhrase, Request, SipBody};
+use crate::transaction::{ClientTransaction, ServerTransaction};
 use crate::ua_layer::dialog::Dialog;
-use crate::{Endpoint, Error, IncomingRequest, Result};
+use crate::{Endpoint, Error, IncomingRequest, IncomingResponse, Result};
 
 // Offer                Answer             RFC    Ini Est Early
 // -------------------------------------------------------------------
@@ -31,6 +31,12 @@ pub struct Incoming {
     server_tsx: ServerTransaction,
 }
 
+pub struct Calling {
+    dialog: Dialog,
+    endpoint: Endpoint,
+    client_tsx: ClientTransaction,
+}
+
 pub struct Established {
     rx: mpsc::Receiver<InviteSessionEvent>,
 }
@@ -44,6 +50,36 @@ pub enum InviteSessionEvent {
 #[derive(Debug)]
 pub enum Cause {
     ByeReceived,
+}
+
+impl InviteSession<Calling> {
+    pub async fn new_client(
+        mut dialog: Dialog,
+        local_sdp: Option<SessionDescription>,
+    ) -> Result<Self> {
+        let mut request = dialog.create_request();
+        let endpoint = dialog.endpoint().clone();
+        
+        let nego = if let Some(sdp) = local_sdp {
+            let encoded = sdp.encode_sdp()?;
+            let sip_body = bytes::Bytes::from(encoded).into();
+            request.body = Some(sip_body);
+            Negotiator::with_local(sdp)
+        } else {
+            Negotiator::default()
+        };
+
+        let client_tsx = ClientTransaction::send_request(request, endpoint.clone()).await?;
+
+        Ok(Self {
+            state: Calling {
+                endpoint,
+                client_tsx,
+                dialog,
+            },
+            nego,
+        })
+    }
 }
 
 impl InviteSession<Incoming> {
@@ -145,7 +181,7 @@ impl Established {
         endpoint: Endpoint,
         tx: mpsc::Sender<InviteSessionEvent>,
     ) -> Result<()> {
-        while let Ok(request) = dialog.recv_request().await {
+        while let Ok(request) = dialog.receive_request().await {
             match request.req_line.method {
                 SipMethod::Invite => {
                     tx.send(InviteSessionEvent::ReInvite(request))
@@ -210,5 +246,21 @@ mod tests {
         let session = InviteSession::from_invite_tsx(server_tsx, contact);
 
         assert!(session.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_client_session() {
+        let endpoint = create_test_endpoint().await;
+
+        let dialog = Dialog::create_uac(
+            SipMethod::Invite,
+            "sip:localhost:5060".parse().unwrap(),
+            "sip:localhost:9099".parse().unwrap(),
+            "<sip:localhost:5060>".parse().unwrap(),
+            endpoint,
+        )
+        .unwrap();
+
+        let session = InviteSession::new_client(dialog, None).await.unwrap();
     }
 }
