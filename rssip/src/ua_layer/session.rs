@@ -8,6 +8,7 @@ use tokio::sync::mpsc;
 use crate::message::headers::Contact;
 use crate::message::method::SipMethod;
 use crate::message::status_code::StatusCode;
+use crate::message::uri::{SipUri, Uri};
 use crate::message::{ReasonPhrase, Request, SipBody};
 use crate::transaction::{ClientTransaction, ServerTransaction};
 use crate::ua_layer::dialog::Dialog;
@@ -52,15 +53,65 @@ pub enum Cause {
     ByeReceived,
 }
 
+pub struct Invitation {
+    remote_target: Uri,
+    local_uri: SipUri,
+    remote_uri: SipUri,
+    early_offer: Option<SessionDescription>,
+}
+
+#[derive(Default)]
+pub struct InvitationBuilder {
+    target: Option<Uri>,
+    local_uri: Option<SipUri>,
+    remote_uri: Option<SipUri>,
+    early_offer: Option<SessionDescription>,
+}
+
+impl InvitationBuilder {
+    pub fn target(mut self, target: Uri) -> Self {
+        self.target = Some(target);
+        self
+    }
+
+    pub fn local_uri(mut self, sip_uri: SipUri) -> Self {
+        self.local_uri = Some(sip_uri);
+        self
+    }
+
+    pub fn remote_uri(mut self, sip_uri: SipUri) -> Self {
+        self.remote_uri = Some(sip_uri);
+        self
+    }
+
+    pub fn offer(self, offer: SessionDescription) -> Self {
+        todo!()
+    }
+
+    pub fn build(self) -> Result<Invitation> {
+        todo!()
+    }
+}
+
+impl Invitation {
+    pub fn builder() -> InvitationBuilder {
+        InvitationBuilder::default()
+    }
+}
+
 impl InviteSession<Calling> {
-    pub async fn new_client(
-        mut dialog: Dialog,
-        local_sdp: Option<SessionDescription>,
-    ) -> Result<Self> {
+    pub async fn send(invitation: Invitation, endpoint: Endpoint) -> Result<Self> {
+        let mut dialog = Dialog::create_uac(
+            SipMethod::Invite,
+            invitation.remote_target,
+            invitation.local_uri,
+            invitation.remote_uri,
+            endpoint.clone(),
+        )?;
+
         let mut request = dialog.create_request();
-        let endpoint = dialog.endpoint().clone();
-        
-        let nego = if let Some(sdp) = local_sdp {
+
+        let nego = if let Some(sdp) = invitation.early_offer {
             let encoded = sdp.encode_sdp()?;
             let sip_body = bytes::Bytes::from(encoded).into();
             request.body = Some(sip_body);
@@ -252,15 +303,20 @@ mod tests {
     async fn test_client_session() {
         let endpoint = create_test_endpoint().await;
 
-        let dialog = Dialog::create_uac(
-            SipMethod::Invite,
-            "sip:localhost:5060".parse().unwrap(),
-            "sip:localhost:9099".parse().unwrap(),
-            "<sip:localhost:5060>".parse().unwrap(),
-            endpoint,
-        )
-        .unwrap();
+        let target = "sip:sip_homologa2.55pbx.com".parse().unwrap();
+        let from = "sip:localhost:8089".parse().unwrap();
+        let to = "sip:sip_homologa2.55pbx.com:5060".parse().unwrap();
 
-        let session = InviteSession::new_client(dialog, None).await.unwrap();
+        let sdp = SessionDescription::default();
+
+        let invitation = Invitation::builder()
+            .target(target)
+            .local_uri(from)
+            .remote_uri(to)
+            .offer(sdp)
+            .build()
+            .unwrap();
+
+        let _session = InviteSession::send(invitation, endpoint).await.unwrap();
     }
 }

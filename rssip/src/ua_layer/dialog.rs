@@ -456,34 +456,3 @@ impl RouteSet {
             .collect()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use std::str::FromStr;
-
-    use super::*;
-    #[tokio::test]
-    async fn dialog_uac_simple_create() {
-        let endpoint = crate::test_utils::create_test_endpoint().await;
-        let target = Uri::from_str("sip:localhost").unwrap();
-        let local_uri = SipUri::from_str("sip:localhost:9090").unwrap();
-
-        // let dialog = Dialog::create_uac(
-        //     SipMethod::Invite,
-        //     target.clone(),
-        //     local_uri,
-        //     SipUri::Uri(target),
-        //     endpoint,
-        // ).unwrap();
-        // let request = dialog.create_request();
-        // dialog.send_request(request);
-
-        // let builder = DialogClientBuilder::new()
-        // .method(SipMethod::Invite)
-        // .target(target.clone())
-        // .local_uri(local_uri)
-        // .remote_uri(SipUri::Uri(target));
-
-        // let dialog = Dialog::create_uac(request, endpoint.clone()).await.unwrap();
-    }
-}
