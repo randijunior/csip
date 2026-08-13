@@ -97,9 +97,9 @@ impl Dialog {
     // RFC 3261 12.1.2.
     pub fn create_uac(
         method: SipMethod,
-        remote_target: Uri,
-        local_uri: SipUri,
-        remote_uri: SipUri,
+        from_uri: SipUri,
+        to_uri: SipUri,
+        contact_uri: Option<SipUri>,
         endpoint: Endpoint,
     ) -> Result<Dialog> {
         if !method.can_establish_dialog() {
@@ -108,22 +108,23 @@ impl Dialog {
                 method
             )));
         }
-        let secure = remote_target.scheme == Scheme::Sips;
+        let contact_uri = contact_uri.unwrap_or(from_uri.clone());
+        let secure = to_uri.scheme() == Scheme::Sips;
         let from_tag = crate::generate_tag();
         let cseq_num = rand::random();
         let call_id = CallId::new(crate::random_str(22));
         let from = From {
-            uri: local_uri.clone(),
+            uri: from_uri,
             tag: Some(from_tag.clone()),
             params: Default::default(),
         };
         let to = To {
-            uri: remote_uri,
+            uri: to_uri,
             tag: None,
             params: Default::default(),
         };
         let contact = Contact {
-            uri: local_uri,
+            uri: contact_uri,
             q: None,
             expires: None,
             param: Params::default(),
@@ -162,7 +163,7 @@ impl Dialog {
 
     pub fn create_request(&mut self) -> Request {
         let local_cseq_num = self.local_cseq.get_or_insert(rand::random());
-        let request = Request {
+        Request {
             req_line: RequestLine {
                 method: self.method,
                 uri: self.contact.uri.uri().clone(),
@@ -175,8 +176,7 @@ impl Dialog {
                 Header::MaxForwards(MaxForwards::new(70))
             },
             body: None,
-        };
-        request
+        }
     }
 
     pub async fn provisional_response(

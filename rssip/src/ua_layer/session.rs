@@ -23,7 +23,7 @@ use crate::{Endpoint, Error, IncomingRequest, IncomingResponse, Result};
 
 pub struct InviteSession<S> {
     state: S,
-    nego: Negotiator,
+    negotiator: Negotiator,
 }
 
 pub struct Incoming {
@@ -53,72 +53,27 @@ pub enum Cause {
     ByeReceived,
 }
 
-pub struct Invitation {
-    remote_target: Uri,
-    local_uri: SipUri,
-    remote_uri: SipUri,
-    early_offer: Option<SessionDescription>,
-}
-
-#[derive(Default)]
-pub struct InvitationBuilder {
-    target: Option<Uri>,
-    local_uri: Option<SipUri>,
-    remote_uri: Option<SipUri>,
-    early_offer: Option<SessionDescription>,
-}
-
-impl InvitationBuilder {
-    pub fn target(mut self, target: Uri) -> Self {
-        self.target = Some(target);
-        self
-    }
-
-    pub fn local_uri(mut self, sip_uri: SipUri) -> Self {
-        self.local_uri = Some(sip_uri);
-        self
-    }
-
-    pub fn remote_uri(mut self, sip_uri: SipUri) -> Self {
-        self.remote_uri = Some(sip_uri);
-        self
-    }
-
-    pub fn offer(self, offer: SessionDescription) -> Self {
-        todo!()
-    }
-
-    pub fn build(self) -> Result<Invitation> {
-        todo!()
-    }
-}
-
-impl Invitation {
-    pub fn builder() -> InvitationBuilder {
-        InvitationBuilder::default()
-    }
-}
-
 impl InviteSession<Calling> {
-    pub async fn send(invitation: Invitation, endpoint: Endpoint) -> Result<Self> {
-        let mut dialog = Dialog::create_uac(
-            SipMethod::Invite,
-            invitation.remote_target,
-            invitation.local_uri,
-            invitation.remote_uri,
-            endpoint.clone(),
-        )?;
+    pub async fn send_invite(
+        from_uri: SipUri,
+        to_uri: SipUri,
+        local_sdp: Option<SessionDescription>,
+        endpoint: Endpoint,
+    ) -> Result<Self> {
+        let mut dialog =
+            Dialog::create_uac(SipMethod::Invite, from_uri, to_uri, None, endpoint.clone())?;
+
+        let sip_body = if let Some(sdp) = &local_sdp {
+            let encoded = sdp.encode_sdp()?;
+            Some(bytes::Bytes::from(encoded).into())
+        } else {
+            None
+        };
+
+        let negotiator = local_sdp.map_or(Negotiator::default(), |sdp| Negotiator::with_local(sdp));
 
         let mut request = dialog.create_request();
-
-        let nego = if let Some(sdp) = invitation.early_offer {
-            let encoded = sdp.encode_sdp()?;
-            let sip_body = bytes::Bytes::from(encoded).into();
-            request.body = Some(sip_body);
-            Negotiator::with_local(sdp)
-        } else {
-            Negotiator::default()
-        };
+        request.body = sip_body;
 
         let client_tsx = ClientTransaction::send_request(request, endpoint.clone()).await?;
 
@@ -128,8 +83,12 @@ impl InviteSession<Calling> {
                 client_tsx,
                 dialog,
             },
-            nego,
+            negotiator,
         })
+    }
+
+    pub async fn wait_answer(&mut self) -> Result<InviteSession<Established>> {
+        todo!()
     }
 }
 
@@ -137,7 +96,7 @@ impl InviteSession<Incoming> {
     pub fn from_invite_tsx(server_tsx: ServerTransaction, contact: Contact) -> Result<Self> {
         let invite = server_tsx.request();
         let endpoint = server_tsx.endpoint().clone();
-        let nego = if let Some(body) = &invite.body {
+        let negotiator = if let Some(body) = &invite.body {
             // EarlyOffer
             Negotiator::with_remote(Self::get_sdp(body)?)
         } else {
@@ -151,7 +110,7 @@ impl InviteSession<Incoming> {
                 endpoint,
                 server_tsx,
             },
-            nego,
+            negotiator,
         })
     }
 
@@ -195,13 +154,13 @@ impl InviteSession<Incoming> {
 
         Ok(InviteSession {
             state: Established::new(dialog, endpoint),
-            nego: self.nego,
+            negotiator: self.negotiator,
         })
     }
 
     fn create_sdp_answer(&mut self, offer: SessionDescription) -> Result<SipBody> {
-        self.nego.set_local_sdp(offer)?;
-        let answer = self.nego.create_answer()?;
+        self.negotiator.set_local_sdp(offer)?;
+        let answer = self.negotiator.create_answer()?;
         let encoded = answer.encode_sdp()?;
         Ok(bytes::Bytes::from(encoded).into())
     }
@@ -303,20 +262,13 @@ mod tests {
     async fn test_client_session() {
         let endpoint = create_test_endpoint().await;
 
-        let target = "sip:sip_homologa2.55pbx.com".parse().unwrap();
-        let from = "sip:localhost:8089".parse().unwrap();
-        let to = "sip:sip_homologa2.55pbx.com:5060".parse().unwrap();
+        let from_uri = "sip:localhost:8089".parse().unwrap();
+        let to_uri = "sip:sip_homologa2.55pbx.com:5060".parse().unwrap();
 
-        let sdp = SessionDescription::default();
+        let sdp = Some(SessionDescription::default());
 
-        let invitation = Invitation::builder()
-            .target(target)
-            .local_uri(from)
-            .remote_uri(to)
-            .offer(sdp)
-            .build()
+        let _session = InviteSession::send_invite(from_uri, to_uri, sdp, endpoint)
+            .await
             .unwrap();
-
-        let _session = InviteSession::send(invitation, endpoint).await.unwrap();
     }
 }
