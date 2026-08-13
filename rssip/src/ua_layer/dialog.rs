@@ -274,7 +274,7 @@ impl Dialog {
         loop {
             match time::timeout(ack_timer, self.receive_request())
                 .await
-                .map_err(|_elapsed| Error::Other("No ACK received".into()))??
+                .map_err(|_elapsed| Error::Custom("No ACK received".into()))??
             {
                 req if req.req_line.method == SipMethod::Ack => {
                     self.state = DialogState::Confirmed;

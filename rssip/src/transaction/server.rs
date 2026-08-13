@@ -109,7 +109,7 @@ impl ServerTransaction {
         let code = response.status_line.code;
 
         if !code.is_provisional() {
-            return Err(Error::Other(format!(
+            return Err(Error::Custom(format!(
                 "Invalid provisional response (expected 1xx) got {code:?}"
             )));
         }
@@ -155,7 +155,7 @@ impl ServerTransaction {
         let code = response.status_line.code;
 
         if !code.is_final() {
-            return Err(Error::Other(format!(
+            return Err(Error::Custom(format!(
                 "Invalid final response (expected 2xx-6xx) got {code:?}"
             )));
         }

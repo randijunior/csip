@@ -34,7 +34,7 @@ pub struct ParseQError;
 
 impl From<ParseQError> for crate::Error {
     fn from(value: ParseQError) -> Self {
-        Self::Other(format!("{:#?}", value))
+        Self::Custom(format!("{:#?}", value))
     }
 }
 

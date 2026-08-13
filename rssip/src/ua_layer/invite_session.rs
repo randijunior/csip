@@ -70,7 +70,7 @@ impl InviteSession<Calling> {
             None
         };
 
-        let negotiator = local_sdp.map_or(Negotiator::default(), |sdp| Negotiator::with_local(sdp));
+        let negotiator = local_sdp.map_or(Negotiator::default(), Negotiator::with_local);
 
         let mut request = dialog.create_request();
         request.body = sip_body;
@@ -93,17 +93,26 @@ impl InviteSession<Calling> {
 }
 
 impl InviteSession<Incoming> {
-    pub fn from_invite(server_tsx: ServerTransaction, contact: Contact) -> Result<Self> {
-        let invite = server_tsx.request();
-        let endpoint = server_tsx.endpoint().clone();
-        let negotiator = if let Some(body) = &invite.body {
+    pub fn from_invite(
+        request: IncomingRequest,
+        contact: Contact,
+        endpoint: Endpoint,
+    ) -> Result<Self> {
+        if request.req_line.method != SipMethod::Invite {
+            return Err(Error::Custom(format!(
+                "unexpected method '{}' expected INVITE",
+                request.req_line.method
+            )));
+        }
+        let dialog = Dialog::create_uas(&request, contact, endpoint.clone())?;
+        let negotiator = if let Some(body) = &request.body {
             // EarlyOffer
             Negotiator::with_remote(Self::get_sdp(body)?)
         } else {
             // DelayedOffer
             Negotiator::default()
         };
-        let dialog = Dialog::create_uas(invite, contact, endpoint.clone())?;
+        let server_tsx = ServerTransaction::from_request(request, endpoint.clone());
         Ok(InviteSession {
             state: Incoming {
                 dialog,
@@ -251,9 +260,8 @@ mod tests {
         let endpoint = create_test_endpoint().await;
         let request = create_test_invite();
         let contact = "test <sip:localhost:5969>".parse().unwrap();
-        let server_tsx = ServerTransaction::from_request(request, endpoint);
 
-        let session = InviteSession::from_invite(server_tsx, contact);
+        let session = InviteSession::from_invite(request, contact, endpoint);
 
         assert!(session.is_ok());
     }

@@ -8,7 +8,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 impl std::convert::From<Utf8Error> for Error {
     fn from(value: Utf8Error) -> Self {
-        Self::Other(format!("{:#?}", value))
+        Self::Custom(format!("{:#?}", value))
     }
 }
 
@@ -48,7 +48,7 @@ pub enum Error {
     ResolveError(#[from] hickory_resolver::ResolveError),
 
     #[error("error: {0}")]
-    Other(String),
+    Custom(String),
 
     #[error("error: {0}")]
     MediaError(#[from] media::error::Error),
