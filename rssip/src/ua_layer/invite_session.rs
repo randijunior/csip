@@ -93,7 +93,7 @@ impl InviteSession<Calling> {
 }
 
 impl InviteSession<Incoming> {
-    pub fn from_invite_tsx(server_tsx: ServerTransaction, contact: Contact) -> Result<Self> {
+    pub fn receive_invite(server_tsx: ServerTransaction, contact: Contact) -> Result<Self> {
         let invite = server_tsx.request();
         let endpoint = server_tsx.endpoint().clone();
         let negotiator = if let Some(body) = &invite.body {
@@ -253,7 +253,7 @@ mod tests {
         let contact = "test <sip:localhost:5969>".parse().unwrap();
         let server_tsx = ServerTransaction::from_request(request, endpoint);
 
-        let session = InviteSession::from_invite_tsx(server_tsx, contact);
+        let session = InviteSession::receive_invite(server_tsx, contact);
 
         assert!(session.is_ok());
     }
