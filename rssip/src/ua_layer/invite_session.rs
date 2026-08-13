@@ -38,6 +38,11 @@ pub struct Calling {
     client_tsx: ClientTransaction,
 }
 
+pub struct Accepted {
+    dialog: Dialog,
+    endpoint: Endpoint,
+}
+
 pub struct Established {
     rx: mpsc::Receiver<InviteSessionEvent>,
 }
@@ -77,17 +82,27 @@ impl InviteSession<Calling> {
 
         let client_tsx = ClientTransaction::send_request(request, endpoint.clone()).await?;
 
-        Ok(Self {
-            state: Calling {
-                endpoint,
-                client_tsx,
-                dialog,
-            },
-            negotiator,
-        })
+        let state = Calling {
+            endpoint,
+            client_tsx,
+            dialog,
+        };
+
+        Ok(Self { state, negotiator })
     }
 
-    pub async fn wait_answer(&mut self) -> Result<InviteSession<Established>> {
+    pub async fn receive_provisional(&mut self) -> Result<Option<IncomingResponse>> {
+        let response = self.state.client_tsx.receive_provisional_response().await?;
+        Ok(response)
+    }
+
+    pub async fn wait_accept(mut self) -> Result<InviteSession<Accepted>> {
+        todo!()
+    }
+}
+
+impl InviteSession<Accepted> {
+    pub async fn ack(self) -> Result<InviteSession<Established>> {
         todo!()
     }
 }
@@ -275,8 +290,15 @@ mod tests {
 
         let sdp = Some(SessionDescription::default());
 
-        let _session = InviteSession::send_invite(from_uri, to_uri, sdp, endpoint)
+        let mut session = InviteSession::send_invite(from_uri, to_uri, sdp, endpoint)
             .await
             .unwrap();
+
+        while let Some(provisional) = session.receive_provisional().await.unwrap() {
+            let code = provisional.status_line.code.as_u16();
+            println!("received provisional: {}", code);
+        }
+        let session = session.wait_accept().await.unwrap();
+        let session = session.ack().await.unwrap();
     }
 }
