@@ -124,7 +124,7 @@ impl InviteSession<Calling> {
             // 13.2.2.2 3xx Responses
             300..=399 => todo!(),
             // 13.2.2.3 4xx, 5xx and 6xx Responses
-            400..=600 => todo!(),
+            400..=699 => todo!(),
             _ => unreachable!("The response should always have a valid final status_code"),
         }
     }
