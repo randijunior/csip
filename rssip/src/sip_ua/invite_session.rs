@@ -5,7 +5,7 @@ use media::sdp::negotiator::SdpNegotiator;
 use media::sdp::parser::SdpParser;
 use tokio::sync::mpsc;
 
-use crate::message::headers::Contact;
+use crate::message::headers::{Contact, Header};
 use crate::message::method::SipMethod;
 use crate::message::status_code::StatusCode;
 use crate::message::uri::SipUri;
@@ -61,6 +61,7 @@ pub struct InvitationParams {
 }
 
 impl InviteSession<Calling> {
+    // RFC 3261 13.2.1
     pub async fn initiate(params: InvitationParams, endpoint: Endpoint) -> Result<Self> {
         let InvitationParams {
             from_uri,
@@ -68,7 +69,7 @@ impl InviteSession<Calling> {
             local_contact,
             local_sdp,
         } = params;
-        
+
         let mut dialog = Dialog::create_uac(from_uri, to_uri, local_contact, endpoint.clone());
         let mut request = dialog.create_request(SipMethod::Invite);
 
@@ -77,8 +78,20 @@ impl InviteSession<Calling> {
             let sip_body = SipBody::from(bytes::Bytes::from(encoded));
             request.body = Some(sip_body);
         }
-        let sdp_negotiator = local_sdp.map_or(SdpNegotiator::default(), SdpNegotiator::with_local);
 
+        let allow = endpoint.allow();
+        let supported = endpoint.supported();
+
+        if !allow.is_empty() {
+            request.headers.push(Header::Allow(allow.clone()));
+        }
+
+        if !supported.is_empty() {
+            request.headers.push(Header::Supported(supported.clone()));
+        }
+
+        let sdp_negotiator = local_sdp.map_or(SdpNegotiator::default(), SdpNegotiator::with_local);
+        
         let client_tsx = ClientTransaction::send_request(request, endpoint.clone()).await?;
 
         let state = Calling {
