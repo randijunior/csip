@@ -38,13 +38,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with_timer(ChronoLocal::new(String::from("%H:%M:%S%.3f")))
         .init();
 
-    let endpoint = Endpoint::builder()
+    let _endpoint = Endpoint::builder()
         .with_plugin(SipStateless)
         .with_udp_addr("0.0.0.0:8089")
         .build()
         .await?;
 
-    endpoint.run_forever().await?;
+    tokio::signal::ctrl_c().await?;
+    println!("shutting down");
 
     Ok(())
 }

@@ -64,10 +64,6 @@ impl Endpoint {
         self.inner.name.as_str()
     }
 
-    pub async fn run_forever(self) -> Result<()> {
-        futures_util::future::pending().await
-    }
-
     pub(crate) fn plugin<M: plugin::Plugin>(&self) -> &M {
         self.inner
             .plugins
