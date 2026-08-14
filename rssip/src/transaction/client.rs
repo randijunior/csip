@@ -1,3 +1,4 @@
+use std::assert_matches;
 use std::net::SocketAddr;
 
 use tokio::sync::mpsc::{self};
@@ -7,13 +8,13 @@ use utils::PeekableReceiver;
 use crate::error::{Error, TransactionError};
 use crate::message::Request;
 use crate::message::headers::via::Rport;
-use crate::message::headers::{Header, Via};
+use crate::message::headers::{CSeq, Header, Via};
 use crate::message::method::SipMethod;
 use crate::transaction::fsm::{State, StateMachine};
 use crate::transaction::timers::{T1, T4};
 use crate::transaction::{Role, TransactionKey};
 use crate::transport::TransportHandle;
-use crate::transport::incoming::{IncomingMessage, IncomingResponse};
+use crate::transport::incoming::{IncomingMessage, IncomingResponse, MandatoryHeaders};
 use crate::transport::outgoing::OutgoingRequest;
 use crate::{Endpoint, Result, find_map_mut_header};
 
@@ -111,6 +112,37 @@ impl ClientTransaction {
         Ok(client_tsx)
     }
 
+    pub(crate) fn create_ack_request(
+        &self,
+        outgoing: &OutgoingRequest,
+        response: &IncomingResponse,
+    ) -> OutgoingRequest {
+        assert_matches!(
+            response.status_line.code.as_u16(),
+            300..699,
+            "Invalid status code for ACK, must be a 300-699 final response"
+        );
+        let target = outgoing.request.req_line.uri.clone();
+        // Clone: Via, To, From, Max-Forwards, Call-ID and CSeq from response.
+        let headers = MandatoryHeaders {
+            cseq: CSeq::new(
+                response.incoming_info.mandatory_headers.cseq.cseq(),
+                SipMethod::Ack,
+            ),
+            ..response.incoming_info.mandatory_headers.clone()
+        }
+        .into_headers();
+
+        let request = Request::with_headers(SipMethod::Ack, target, headers);
+        let target_info = outgoing.target_info.clone();
+
+        OutgoingRequest {
+            request,
+            target_info,
+            encoded: Default::default(),
+        }
+    }
+
     pub async fn receive_provisional_response(&mut self) -> Result<Option<IncomingResponse>> {
         let state = self.state();
 
@@ -144,7 +176,7 @@ impl ClientTransaction {
         self.state_machine.set_state(State::Completed);
 
         let (timer, mut ack_request) = if is_invite_tsx {
-            let mut ack_request = self.endpoint.create_ack_request(&self.request, &response);
+            let mut ack_request = self.create_ack_request(&self.request, &response);
             self.endpoint
                 .send_outgoing_request(&mut ack_request)
                 .await?;

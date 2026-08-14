@@ -11,19 +11,25 @@ use crate::message::method::SipMethod;
 use crate::message::params::Params;
 use crate::message::status_code::StatusCode;
 use crate::message::uri::{Scheme, SipUri, Uri};
-use crate::message::{ReasonPhrase, Request, RequestLine, SipBody};
-use crate::transaction::{ClientTransaction, Role, ServerTransaction, timers};
+use crate::message::{ReasonPhrase, Request, RequestLine};
+use crate::transaction::{Role, ServerTransaction, timers};
 use crate::transport::incoming::{IncomingMessage, IncomingRequest};
 use crate::{
-    Endpoint, IncomingResponse, OutgoingRequest, OutgoingResponse, find_map_header,
-    find_map_mut_header, headers,
+    Endpoint, IncomingResponse, OutgoingResponse, find_map_header, find_map_mut_header, headers,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DialogState {
-    Initial,
+    Init,
     Early,
     Confirmed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct DialogId {
+    pub call_id: CallId,
+    pub local_tag: String,
+    pub remote_tag: Option<String>,
 }
 
 /// Represents a SIP Dialog.
@@ -38,9 +44,50 @@ pub struct Dialog {
     secure: bool,
     route_set: Vec<RouteSet>,
     role: Role,
-    method: SipMethod,
-    receiver: mpsc::Receiver<IncomingMessage>,
+    receiver: mpsc::UnboundedReceiver<IncomingMessage>,
     endpoint: Endpoint,
+}
+
+#[derive(Default)]
+pub struct DialogPlugin {
+    dialogs: RwLock<FxHashMap<DialogId, mpsc::UnboundedSender<IncomingMessage>>>,
+}
+
+#[async_trait::async_trait]
+impl endpoint::Plugin for DialogPlugin {
+    fn name(&self) -> &'static str {
+        "dialog"
+    }
+
+    async fn on_incoming_request(&self, mut req: ToTake<'_, IncomingRequest>, endpoint: &Endpoint) {
+        let Some(dialog_id) = DialogId::from_incoming_request(&req) else {
+            return;
+        };
+
+        let request = req.take();
+
+        let Some(channel) = self.get_dialog(&dialog_id) else {
+            if request.req_line.method != SipMethod::Ack {
+                let mut response = endpoint.create_outgoing_response(
+                    &request,
+                    StatusCode::CallOrTransactionDoesNotExist,
+                    None,
+                );
+                if let Err(err) = endpoint.send_outgoing_response(&mut response).await {
+                    log::error!("Error sending response = {err:?}");
+                }
+            }
+            return;
+        };
+
+        // this is a mid-dialog request.
+        if let Err(err) = channel.send(IncomingMessage::Request(request)) {
+            log::error!("Error sending request to dialog {err}");
+        }
+    }
+
+    async fn on_incoming_response(&self, _res: ToTake<'_, IncomingResponse>, _endpoint: &Endpoint) {
+    }
 }
 
 impl Dialog {
@@ -68,14 +115,13 @@ impl Dialog {
             local_tag: crate::generate_tag(),
         };
 
-        let (sender, receiver) = mpsc::channel(10);
+        let (sender, receiver) = mpsc::unbounded_channel();
 
         endpoint
             .ua_plugin()
             .register_dialog(dialog_id.clone(), sender);
 
         let dialog = Dialog {
-            method: request.req_line.method,
             dialog_id,
             remote_cseq: Some(mandatory_headers.cseq.cseq()),
             local_cseq: None,
@@ -84,7 +130,7 @@ impl Dialog {
             secure: request.incoming_info.transport_msg.transport.is_secure()
                 && request.req_line.uri.scheme == Scheme::Sips,
             route_set: RouteSet::from_headers(&request.headers),
-            state: DialogState::Initial,
+            state: DialogState::Init,
             role: Role::Uas,
             contact,
             receiver,
@@ -96,18 +142,11 @@ impl Dialog {
 
     // RFC 3261 12.1.2.
     pub fn create_uac(
-        method: SipMethod,
         from_uri: SipUri,
         to_uri: SipUri,
         contact_uri: Option<SipUri>,
         endpoint: Endpoint,
-    ) -> Result<Dialog> {
-        if !method.can_establish_dialog() {
-            return Err(Error::Dialog(format!(
-                "The sip method '{}' cannot establish a dialog",
-                method
-            )));
-        }
+    ) -> Dialog {
         let contact_uri = contact_uri.unwrap_or(from_uri.clone());
         let secure = to_uri.scheme() == Scheme::Sips;
         let from_tag = crate::generate_tag();
@@ -136,14 +175,13 @@ impl Dialog {
             remote_tag: None,    // MUST be set to the tag in the To field of the response
         };
 
-        let (sender, receiver) = mpsc::channel(10);
+        let (sender, receiver) = mpsc::unbounded_channel();
 
         endpoint
             .ua_plugin()
             .register_dialog(dialog_id.clone(), sender);
 
         let dialog = Dialog {
-            method,
             dialog_id,
             remote_cseq: None,
             local_cseq: Some(cseq_num),
@@ -151,28 +189,28 @@ impl Dialog {
             to,
             secure,
             route_set: vec![],
-            state: DialogState::Initial,
+            state: DialogState::Init,
             role: Role::Uac,
             contact,
             receiver,
             endpoint,
         };
 
-        Ok(dialog)
+        dialog
     }
 
-    pub fn create_request(&mut self) -> Request {
+    pub fn create_request(&mut self, method: SipMethod) -> Request {
         let local_cseq_num = self.local_cseq.get_or_insert(rand::random());
         Request {
             req_line: RequestLine {
-                method: self.method,
+                method,
                 uri: self.contact.uri.uri().clone(),
             },
             headers: headers! {
                 Header::From(self.from.clone()),
                 Header::To(self.to.clone()),
                 Header::CallId(self.dialog_id.call_id.clone()),
-                Header::CSeq(CSeq::new(*local_cseq_num, self.method)),
+                Header::CSeq(CSeq::new(*local_cseq_num, method)),
                 Header::MaxForwards(MaxForwards::new(70))
             },
             body: None,
@@ -322,10 +360,6 @@ impl Dialog {
 
         Ok(())
     }
-
-    pub(crate) fn endpoint(&self) -> &Endpoint {
-        &self.endpoint
-    }
 }
 
 impl Drop for Dialog {
@@ -334,16 +368,11 @@ impl Drop for Dialog {
     }
 }
 
-#[derive(Default)]
-pub struct DialogPlugin {
-    dialogs: RwLock<FxHashMap<DialogId, mpsc::Sender<IncomingMessage>>>,
-}
-
 impl DialogPlugin {
     pub(crate) fn register_dialog(
         &self,
         dialog_id: DialogId,
-        sender: mpsc::Sender<IncomingMessage>,
+        sender: mpsc::UnboundedSender<IncomingMessage>,
     ) {
         let mut dialogs = self.dialogs.write().expect("Lock failed");
 
@@ -356,60 +385,14 @@ impl DialogPlugin {
         dialogs.remove(dialog_id);
     }
 
-    pub(crate) fn get_dialog(&self, dialog_id: &DialogId) -> Option<mpsc::Sender<IncomingMessage>> {
+    pub(crate) fn get_dialog(
+        &self,
+        dialog_id: &DialogId,
+    ) -> Option<mpsc::UnboundedSender<IncomingMessage>> {
         let dialogs = self.dialogs.read().expect("Lock failed");
 
         dialogs.get(dialog_id).cloned()
     }
-}
-
-#[async_trait::async_trait]
-impl endpoint::Plugin for DialogPlugin {
-    fn name(&self) -> &'static str {
-        "dialog"
-    }
-
-    async fn on_incoming_request(&self, mut req: ToTake<'_, IncomingRequest>, endpoint: &Endpoint) {
-        let Some(dialog_id) = DialogId::from_incoming_request(&req) else {
-            return;
-        };
-
-        let request = req.take();
-
-        let Some(channel) = self.get_dialog(&dialog_id) else {
-            if request.req_line.method != SipMethod::Ack {
-                let mut response = endpoint.create_outgoing_response(
-                    &request,
-                    StatusCode::CallOrTransactionDoesNotExist,
-                    None,
-                );
-                if let Err(err) = endpoint.send_outgoing_response(&mut response).await {
-                    log::error!("Error sending response = {err:?}");
-                }
-            }
-            return;
-        };
-
-        // this is a mid-dialog request.
-
-        if channel
-            .send(IncomingMessage::Request(request))
-            .await
-            .is_err()
-        {
-            log::error!("Error sending request to dialog");
-        }
-    }
-
-    async fn on_incoming_response(&self, _res: ToTake<'_, IncomingResponse>, _endpoint: &Endpoint) {
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct DialogId {
-    pub call_id: CallId,
-    pub local_tag: String,
-    pub remote_tag: Option<String>,
 }
 
 impl DialogId {

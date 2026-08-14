@@ -6,8 +6,8 @@ mod plugin;
 use std::any::type_name;
 use std::borrow::Cow;
 use std::net::SocketAddr;
+use std::sync;
 use std::sync::Arc;
-use std::{assert_matches, sync};
 
 pub use builder::EndpointBuilder;
 use bytes::Bytes;
@@ -17,18 +17,17 @@ use self::plugin::Plugins;
 use super::resolver::{LookupAddress, SipHost};
 use crate::Result;
 use crate::error::Error;
-use crate::message::headers::{Accept, Allow, CSeq, Header, Headers, Route, Supported};
-use crate::message::method::SipMethod;
+use crate::message::headers::{Accept, Allow, Header, Headers, Route, Supported};
 use crate::message::status_code::StatusCode;
 use crate::message::uri::{Host, HostPort, NameAddr, Uri};
 use crate::message::{ReasonPhrase, Request, Response, StatusLine};
+use crate::sip_ua::dialog::DialogPlugin;
 use crate::transaction::TsxPlugin;
-use crate::transport::incoming::{IncomingRequest, IncomingResponse, MandatoryHeaders};
+use crate::transport::incoming::{IncomingRequest, IncomingResponse};
 use crate::transport::outgoing::{
     Encode, OutgoingDestInfo, OutgoingRequest, OutgoingResponse, TargetTransportInfo,
 };
 use crate::transport::{TransportHandle, TransportLayer};
-use crate::ua_layer::dialog::DialogPlugin;
 
 struct EndpointInner {
     /// The transport layer for the endpoint.
@@ -163,37 +162,6 @@ impl Endpoint {
         OutgoingResponse {
             response,
             dest_info,
-            encoded: Bytes::new(),
-        }
-    }
-
-    pub(crate) fn create_ack_request(
-        &self,
-        outgoing: &OutgoingRequest,
-        response: &IncomingResponse,
-    ) -> OutgoingRequest {
-        assert_matches!(
-            response.status_line.code.as_u16(),
-            300..699,
-            "Invalid status code for ACK, must be a 300-699 final response"
-        );
-        let target = outgoing.request.req_line.uri.clone();
-        // Clone: Via, To, From, Max-Forwards, Call-ID and CSeq from response.
-        let headers = MandatoryHeaders {
-            cseq: CSeq::new(
-                response.incoming_info.mandatory_headers.cseq.cseq(),
-                SipMethod::Ack,
-            ),
-            ..response.incoming_info.mandatory_headers.clone()
-        }
-        .into_headers();
-
-        let request = Request::with_headers(SipMethod::Ack, target, headers);
-        let target_info = outgoing.target_info.clone();
-
-        OutgoingRequest {
-            request,
-            target_info,
             encoded: Bytes::new(),
         }
     }

@@ -5,7 +5,7 @@ use crate::sdp::{Attribute, MediaDescription, MediaType, SdpTransport, SessionDe
 
 // RFC 3264: An Offer/Answer Model with the Session Description Protocol (SDP)
 #[derive(Default)]
-pub struct Negotiator {
+pub struct SdpNegotiator {
     remote_offer: Option<SessionDescription>,
     local_offer: Option<SessionDescription>,
     answer: Option<SessionDescription>,
@@ -37,7 +37,7 @@ pub struct MediaStreamBuilder {
     port: Option<u16>,
 }
 
-impl Negotiator {
+impl SdpNegotiator {
     pub fn with_local(local: SessionDescription) -> Self {
         Self {
             local_offer: Some(local),
@@ -257,7 +257,7 @@ mod tests {
         let remote_offer = SdpParser::parse(offer).unwrap();
         let local_sdp = SdpParser::parse(answer).unwrap();
 
-        let mut nego = Negotiator::with_remote(remote_offer);
+        let mut nego = SdpNegotiator::with_remote(remote_offer);
 
         // Subject
         // let sdp = SdpSessionConfig::new("sipecho", IpAddr::from_str("200.201.202.203").unwrap());
