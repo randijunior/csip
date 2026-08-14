@@ -8,11 +8,11 @@ use tokio::sync::mpsc;
 use crate::message::headers::Contact;
 use crate::message::method::SipMethod;
 use crate::message::status_code::StatusCode;
-use crate::message::uri::{SipUri, Uri};
-use crate::message::{ReasonPhrase, Request, SipBody};
+use crate::message::uri::SipUri;
+use crate::message::{ReasonPhrase, SipBody};
 use crate::sip_ua::dialog::Dialog;
 use crate::transaction::{ClientTransaction, ServerTransaction};
-use crate::{Endpoint, Error, IncomingRequest, IncomingResponse, OutgoingRequest, Result};
+use crate::{Endpoint, Error, IncomingRequest, IncomingResponse, Result};
 
 // Offer                Answer             RFC    Ini Est Early
 // -------------------------------------------------------------------
@@ -53,14 +53,23 @@ pub enum Cause {
     ByeReceived,
 }
 
+pub struct InvitationParams {
+    from_uri: SipUri,
+    to_uri: SipUri,
+    local_contact: Option<SipUri>,
+    local_sdp: Option<SessionDescription>,
+}
+
 impl InviteSession<Calling> {
-    pub async fn send_invite(
-        from_uri: SipUri,
-        to_uri: SipUri,
-        local_sdp: Option<SessionDescription>,
-        endpoint: Endpoint,
-    ) -> Result<Self> {
-        let mut dialog = Dialog::create_uac(from_uri, to_uri, None, endpoint.clone());
+    pub async fn initiate(params: InvitationParams, endpoint: Endpoint) -> Result<Self> {
+        let InvitationParams {
+            from_uri,
+            to_uri,
+            local_contact,
+            local_sdp,
+        } = params;
+        
+        let mut dialog = Dialog::create_uac(from_uri, to_uri, local_contact, endpoint.clone());
         let mut request = dialog.create_request(SipMethod::Invite);
 
         if let Some(sdp) = &local_sdp {
@@ -78,7 +87,10 @@ impl InviteSession<Calling> {
             dialog,
         };
 
-        Ok(Self { state, sdp_negotiator })
+        Ok(Self {
+            state,
+            sdp_negotiator,
+        })
     }
 
     pub async fn receive_provisional(&mut self) -> Result<Option<IncomingResponse>> {
@@ -146,7 +158,10 @@ impl InviteSession<Incoming> {
             endpoint,
         };
 
-        Ok(InviteSession { state, sdp_negotiator })
+        Ok(Self {
+            state,
+            sdp_negotiator,
+        })
     }
 
     // RFC 3261 13.3.1.1
@@ -300,11 +315,16 @@ mod tests {
         let from_uri = "sip:localhost:8089".parse().unwrap();
         let to_uri = "sip:sip_homologa2.55pbx.com:5060".parse().unwrap();
 
-        let sdp = Some(SessionDescription::default());
+        let local_sdp = Some(SessionDescription::default());
 
-        let mut session = InviteSession::send_invite(from_uri, to_uri, sdp, endpoint)
-            .await
-            .unwrap();
+        let inv_params = InvitationParams {
+            from_uri,
+            to_uri,
+            local_contact: None,
+            local_sdp,
+        };
+
+        let mut session = InviteSession::initiate(inv_params, endpoint).await.unwrap();
 
         while let Some(provisional) = session.receive_provisional().await.unwrap() {
             let code = provisional.status_line.code.as_u16();
