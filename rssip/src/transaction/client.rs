@@ -307,7 +307,11 @@ impl ClientTransaction {
 impl Drop for ClientTransaction {
     fn drop(&mut self) {
         self.endpoint.tsx_plugin().remove_transaction(&self.key);
-        log::trace!("Transaction Destroyed [{:#?}] ({:p})", Role::Uac, &self);
+        let k = match &self.key {
+            TransactionKey::Rfc2543(rfc2543) => &rfc2543.call_id,
+            TransactionKey::Rfc3261(rfc3261) => &rfc3261.branch,
+        };
+        log::trace!("Transaction Destroyed [{:#?}] ({})", Role::Uac, k);
     }
 }
 
