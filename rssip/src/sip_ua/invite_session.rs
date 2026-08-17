@@ -5,7 +5,7 @@ use media::sdp::negotiator::SdpNegotiator;
 use media::sdp::parser::SdpParser;
 use tokio::sync::mpsc;
 
-use crate::message::headers::{Contact, Header};
+use crate::message::headers::{Contact, ContentType, Header};
 use crate::message::method::SipMethod;
 use crate::message::status_code::StatusCode;
 use crate::message::uri::SipUri;
@@ -73,12 +73,6 @@ impl InviteSession<Calling> {
         let mut dialog = Dialog::create_uac(from_uri, to_uri, local_contact, endpoint.clone());
         let mut request = dialog.create_request(SipMethod::Invite);
 
-        if let Some(sdp) = &local_sdp {
-            let encoded = sdp.encode_sdp()?;
-            let sip_body = SipBody::from(bytes::Bytes::from(encoded));
-            request.body = Some(sip_body);
-        }
-
         let allow = endpoint.allow();
         let supported = endpoint.supported();
 
@@ -90,8 +84,17 @@ impl InviteSession<Calling> {
             request.headers.push(Header::Supported(supported.clone()));
         }
 
+        if let Some(sdp) = &local_sdp {
+            let encoded = sdp.encode_sdp()?;
+            let sip_body = SipBody::from(bytes::Bytes::from(encoded));
+            request
+                .headers
+                .push(Header::ContentType(ContentType::new_sdp()));
+            request.body = Some(sip_body);
+        }
+
         let sdp_negotiator = local_sdp.map_or(SdpNegotiator::default(), SdpNegotiator::with_local);
-        
+
         let client_tsx = ClientTransaction::send_request(request, endpoint.clone()).await?;
 
         let state = Calling {
