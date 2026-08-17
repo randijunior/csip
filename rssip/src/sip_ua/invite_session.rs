@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::ops;
 
 use media::sdp::SessionDescription;
@@ -12,7 +13,8 @@ use crate::message::uri::SipUri;
 use crate::message::{ReasonPhrase, SipBody};
 use crate::sip_ua::dialog::Dialog;
 use crate::transaction::{ClientTransaction, ServerTransaction};
-use crate::{Endpoint, Error, IncomingRequest, IncomingResponse, Result};
+use crate::transport::TransportHandle;
+use crate::{Endpoint, Error, IncomingRequest, IncomingResponse, OutgoingRequest, Result};
 
 // Offer                Answer             RFC    Ini Est Early
 // -------------------------------------------------------------------
@@ -56,8 +58,9 @@ pub enum Cause {
 pub struct InvitationParams {
     from_uri: SipUri,
     to_uri: SipUri,
-    local_contact: Option<SipUri>,
+    contact: Option<SipUri>,
     local_sdp: Option<SessionDescription>,
+    transport: Option<(TransportHandle, SocketAddr)>,
 }
 
 impl InviteSession<Calling> {
@@ -66,11 +69,12 @@ impl InviteSession<Calling> {
         let InvitationParams {
             from_uri,
             to_uri,
-            local_contact,
+            contact,
             local_sdp,
+            transport,
         } = params;
 
-        let mut dialog = Dialog::create_uac(from_uri, to_uri, local_contact, endpoint.clone());
+        let mut dialog = Dialog::create_uac(from_uri, to_uri, contact, endpoint.clone());
         let mut request = dialog.create_request(SipMethod::Invite);
 
         let allow = endpoint.allow();
@@ -95,7 +99,12 @@ impl InviteSession<Calling> {
 
         let sdp_negotiator = local_sdp.map_or(SdpNegotiator::default(), SdpNegotiator::with_local);
 
-        let client_tsx = ClientTransaction::send_request(request, endpoint.clone()).await?;
+        let client_tsx = if let Some(transport) = transport {
+            ClientTransaction::send_request_with_target(request, endpoint.clone(), transport)
+                .await?
+        } else {
+            ClientTransaction::send_request(request, endpoint.clone()).await?
+        };
 
         let state = Calling {
             endpoint,
@@ -143,6 +152,10 @@ impl InviteSession<Calling> {
             400..=699 => todo!(),
             _ => unreachable!("The response should always have a valid final status_code"),
         }
+    }
+
+    pub fn request(&self) -> &OutgoingRequest {
+        self.state.client_tsx.request()
     }
 }
 
@@ -303,7 +316,10 @@ impl ops::DerefMut for InviteSession<Established> {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
+    use crate::find_map_header;
     use crate::message::method::SipMethod;
     use crate::test_utils::{create_test_endpoint, create_test_request};
     use crate::transport::{MockTransport, TransportHandle};
@@ -314,35 +330,47 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_server_session() {
+    async fn test_server_session_without_sdp() {
         let endpoint = create_test_endpoint().await;
         let request = create_test_invite();
 
         let contact = "test <sip:localhost:8089>".parse().unwrap();
 
-        let session = InviteSession::from_invite(request, contact, endpoint);
-
-        assert!(session.is_ok());
+        let _session = InviteSession::from_invite(request, contact, endpoint)
+            .expect("Failed to create session from invite");
     }
 
     #[tokio::test]
-    async fn test_client_session() {
+    async fn test_client_session_send_invite_without_sdp() {
         let endpoint = create_test_endpoint().await;
 
-        let from_uri = "sip:localhost:8089".parse().unwrap();
-        let to_uri = "sip:localhost:8089".parse().unwrap();
+        let from_uri = SipUri::from_str("Alice <sip:alice@example.com>").unwrap();
+        let to_uri = SipUri::from_str("Bob <sip:bob@example.com>").unwrap();
 
-        let session = InviteSession::send_invite(
-            InvitationParams {
-                from_uri,
-                to_uri,
-                local_contact: None,
-                local_sdp: None,
-            },
-            endpoint,
-        )
-        .await;
+        let targert_addr = SocketAddr::from_str("127.0.0.1:8089").unwrap();
+        let udp_transport = MockTransport::new_udp();
+        let transport = (TransportHandle::new(udp_transport.clone()), targert_addr);
 
-        assert!(session.is_ok());
+        let params = InvitationParams {
+            from_uri: from_uri.clone(),
+            to_uri: to_uri.clone(),
+            contact: None,
+            local_sdp: None,
+            transport: Some(transport),
+        };
+
+        let session = InviteSession::send_invite(params, endpoint)
+            .await
+            .expect("Failed to create session by sending invite");
+
+        let request = session.request();
+
+        let from_hdr = find_map_header!(request.headers, From).expect("A 'From' header");
+        let to_hdr = find_map_header!(request.headers, To).expect("A 'To' header");
+        let contact_hdr = find_map_header!(request.headers, To).expect("A 'Contact' header");
+
+        assert_eq!(from_hdr.uri, from_uri);
+        assert_eq!(to_hdr.uri, to_uri);
+        assert_eq!(contact_hdr.uri, to_uri);
     }
 }

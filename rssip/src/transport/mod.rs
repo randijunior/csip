@@ -502,8 +502,8 @@ impl MockTransport {
         Self::with_protocol(TransportProtocol::Tls)
     }
 
-    pub fn last_sent_request(&self) -> Option<Request> {
-        self.last_sent_message().map(|msg| {
+    pub fn last_request(&self) -> Option<Request> {
+        self.last_message().map(|msg| {
             if let SipMessage::Request(req) = msg {
                 Some(req)
             } else {
@@ -516,7 +516,7 @@ impl MockTransport {
         self.sent.lock().unwrap().len()
     }
 
-    pub fn last_sent_message(&self) -> Option<SipMessage> {
+    pub fn last_message(&self) -> Option<SipMessage> {
         let guard = self.sent.lock().unwrap();
         guard
             .last()

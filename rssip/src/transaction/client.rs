@@ -299,6 +299,9 @@ impl ClientTransaction {
     fn is_unreliable(&self) -> bool {
         self.request.target_info.transport.is_unreliable()
     }
+    pub(crate) fn request(&self) -> &OutgoingRequest {
+        &self.request
+    }
 }
 
 impl Drop for ClientTransaction {
@@ -586,7 +589,7 @@ mod tests {
             .await
             .expect("Error receiving final response");
 
-        let req = ctx.transport.last_sent_request().expect("A request");
+        let req = ctx.transport.last_request().expect("A request");
         assert_eq!(
             req.req_line.method,
             SipMethod::Ack,
@@ -605,7 +608,7 @@ mod tests {
             .await
             .expect("Error receiving final response");
 
-        let req = ctx.transport.last_sent_request().expect("A request");
+        let req = ctx.transport.last_request().expect("A request");
         assert_eq!(
             req.req_line.method,
             SipMethod::Ack,
@@ -624,7 +627,7 @@ mod tests {
             .await
             .expect("Error receiving final response");
 
-        let req = ctx.transport.last_sent_request().expect("A request");
+        let req = ctx.transport.last_request().expect("A request");
         assert_eq!(
             req.req_line.method,
             SipMethod::Ack,
@@ -643,7 +646,7 @@ mod tests {
             .await
             .expect("Error receiving final response");
 
-        let req = ctx.transport.last_sent_request().expect("A request");
+        let req = ctx.transport.last_request().expect("A request");
         assert_eq!(
             req.req_line.method,
             SipMethod::Ack,
@@ -794,7 +797,7 @@ mod tests {
             .await
             .expect("Error receiving final response");
 
-        let req = ctx.transport.last_sent_request().expect("A request");
+        let req = ctx.transport.last_request().expect("A request");
         assert_eq!(
             req.req_line.method,
             SipMethod::Ack,
@@ -827,7 +830,7 @@ mod tests {
             .await
             .expect("Error receiving final response");
 
-        let req = ctx.transport.last_sent_request().expect("A request");
+        let req = ctx.transport.last_request().expect("A request");
         assert_eq!(
             req.req_line.method,
             SipMethod::Ack,
@@ -860,7 +863,7 @@ mod tests {
             .await
             .expect("Error receiving final response");
 
-        let req = ctx.transport.last_sent_request().expect("A request");
+        let req = ctx.transport.last_request().expect("A request");
         assert_eq!(
             req.req_line.method,
             SipMethod::Ack,
@@ -893,7 +896,7 @@ mod tests {
             .await
             .expect("Error receiving final response");
 
-        let req = ctx.transport.last_sent_request().expect("A request");
+        let req = ctx.transport.last_request().expect("A request");
         assert_eq!(
             req.req_line.method,
             SipMethod::Ack,
