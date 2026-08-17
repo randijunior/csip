@@ -62,7 +62,7 @@ pub struct InvitationParams {
 
 impl InviteSession<Calling> {
     // RFC 3261 13.2.1
-    pub async fn initiate(params: InvitationParams, endpoint: Endpoint) -> Result<Self> {
+    pub async fn send_invite(params: InvitationParams, endpoint: Endpoint) -> Result<Self> {
         let InvitationParams {
             from_uri,
             to_uri,
@@ -314,10 +314,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_session_with_late_offer() {
+    async fn test_server_session() {
         let endpoint = create_test_endpoint().await;
         let request = create_test_invite();
-        let contact = "test <sip:localhost:5969>".parse().unwrap();
+
+        let contact = "test <sip:localhost:8089>".parse().unwrap();
 
         let session = InviteSession::from_invite(request, contact, endpoint);
 
@@ -329,23 +330,19 @@ mod tests {
         let endpoint = create_test_endpoint().await;
 
         let from_uri = "sip:localhost:8089".parse().unwrap();
-        let to_uri = "sip:sip_homologa2.55pbx.com:5060".parse().unwrap();
+        let to_uri = "sip:localhost:8089".parse().unwrap();
 
-        let local_sdp = Some(SessionDescription::default());
+        let session = InviteSession::send_invite(
+            InvitationParams {
+                from_uri,
+                to_uri,
+                local_contact: None,
+                local_sdp: None,
+            },
+            endpoint,
+        )
+        .await;
 
-        let inv_params = InvitationParams {
-            from_uri,
-            to_uri,
-            local_contact: None,
-            local_sdp,
-        };
-
-        let mut session = InviteSession::initiate(inv_params, endpoint).await.unwrap();
-
-        while let Some(provisional) = session.receive_provisional().await.unwrap() {
-            let code = provisional.status_line.code.as_u16();
-            println!("received provisional: {}", code);
-        }
-        let _session = session.wait_answer().await.unwrap();
+        assert!(session.is_ok());
     }
 }
