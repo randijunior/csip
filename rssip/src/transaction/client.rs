@@ -103,10 +103,14 @@ impl ClientTransaction {
             timeout: Instant::now() + T1 * 64,
         };
 
+        let TransactionKey::Rfc3261(rfc3261) = &client_tsx.key else {
+            unreachable!("We always create a rfc3261 key")
+        };
+
         log::trace!(
-            "Client Transaction Created [{:#?}] ({:p})",
+            "Client Transaction Created [{:#?}] ({})",
             method,
-            &client_tsx
+            rfc3261.branch
         );
 
         Ok(client_tsx)
