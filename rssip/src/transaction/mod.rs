@@ -105,6 +105,12 @@ pub enum TransactionKey {
 }
 
 impl TransactionKey {
+    pub fn branch(&self) -> Option<&str> {
+        match self {
+            TransactionKey::Rfc2543(_rfc2543) => None,
+            TransactionKey::Rfc3261(rfc3261) => Some(rfc3261.branch.as_str()),
+        }
+    }
     pub fn from_request(request: &IncomingRequest) -> Self {
         Self::from_incoming_info(&request.incoming_info, Role::Uas)
     }

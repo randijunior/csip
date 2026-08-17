@@ -103,14 +103,13 @@ impl ClientTransaction {
             timeout: Instant::now() + T1 * 64,
         };
 
-        let TransactionKey::Rfc3261(rfc3261) = &client_tsx.key else {
-            unreachable!("We always create a rfc3261 key")
-        };
-
         log::trace!(
             "Client Transaction Created [{:#?}] ({})",
             method,
-            rfc3261.branch
+            client_tsx
+                .key
+                .branch()
+                .expect("We always create a rfc3261 key")
         );
 
         Ok(client_tsx)
@@ -311,10 +310,12 @@ impl ClientTransaction {
 impl Drop for ClientTransaction {
     fn drop(&mut self) {
         self.endpoint.tsx_plugin().remove_transaction(&self.key);
-        let TransactionKey::Rfc3261(rfc3261) = &self.key else {
-            unreachable!("We always create a rfc3261 key")
-        };
-        log::trace!("Transaction Destroyed [{:#?}] ({})", Role::Uac, rfc3261.branch);
+
+        log::trace!(
+            "Transaction Destroyed [{:#?}] ({})",
+            Role::Uac,
+            self.key.branch().expect("We always create a rfc3261 key")
+        );
     }
 }
 
