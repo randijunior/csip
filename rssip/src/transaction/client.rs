@@ -109,7 +109,7 @@ impl ClientTransaction {
             client_tsx
                 .key
                 .branch()
-                .expect("We always create a rfc3261 key")
+                .expect("Branch must exist: RFC 3261 key always includes branch parameter")
         );
 
         Ok(client_tsx)
@@ -314,7 +314,9 @@ impl Drop for ClientTransaction {
         log::trace!(
             "Transaction Destroyed [{:#?}] ({})",
             Role::Uac,
-            self.key.branch().expect("We always create a rfc3261 key")
+            self.key
+                .branch()
+                .expect("Branch must exist: RFC 3261 key always includes branch parameter")
         );
     }
 }
