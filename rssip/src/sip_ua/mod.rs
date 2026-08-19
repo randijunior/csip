@@ -1,2 +1,2 @@
 pub mod dialog;
-pub mod invite_session;
+pub mod session;
