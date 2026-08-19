@@ -184,9 +184,7 @@ impl InviteSession<Incoming> {
         status_code: StatusCode,
         reason_phrase: Option<ReasonPhrase>,
     ) -> Result<()> {
-        let Incoming {
-            server_tsx, dialog, ..
-        } = &mut self.state;
+        let Incoming { server_tsx, dialog } = &mut self.state;
 
         dialog
             .provisional_response(server_tsx, status_code, reason_phrase)
@@ -262,7 +260,7 @@ impl Established {
                 SipMethod::Bye => {
                     let endpoint = dialog.endpoint().clone();
                     let bye_tsx = ServerTransaction::from_request(request, endpoint);
-                    
+
                     dialog.final_response(bye_tsx, StatusCode::Ok).await?;
 
                     tx.send(InviteSessionEvent::Terminated(Cause::ByeReceived))
