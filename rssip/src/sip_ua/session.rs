@@ -53,25 +53,16 @@ pub enum Cause {
     ByeReceived,
 }
 
-pub struct InvitationParams {
-    from_uri: SipUri,
-    to_uri: SipUri,
-    contact: Option<SipUri>,
-    local_sdp: Option<SessionDescription>,
-    transport: Option<(TransportHandle, SocketAddr)>,
-}
-
 impl InviteSession<Calling> {
     // RFC 3261 13.2.1
-    pub async fn send_invite(params: InvitationParams, endpoint: Endpoint) -> Result<Self> {
-        let InvitationParams {
-            from_uri,
-            to_uri,
-            contact,
-            local_sdp,
-            transport,
-        } = params;
-
+    pub async fn send_invite(
+        from_uri: SipUri,
+        to_uri: SipUri,
+        contact: Option<SipUri>,
+        local_sdp: Option<SessionDescription>,
+        transport: Option<(TransportHandle, SocketAddr)>,
+        endpoint: Endpoint,
+    ) -> Result<Self> {
         let mut dialog = Dialog::create_uac(from_uri, to_uri, contact, endpoint.clone());
         let mut request = dialog.create_request(SipMethod::Invite);
 
@@ -89,6 +80,7 @@ impl InviteSession<Calling> {
         if let Some(sdp) = &local_sdp {
             let encoded = sdp.encode_sdp()?;
             let sip_body = SipBody::from(bytes::Bytes::from(encoded));
+            
             request
                 .headers
                 .push(Header::ContentType(ContentType::new_sdp()));
@@ -98,15 +90,15 @@ impl InviteSession<Calling> {
         let negotiator = local_sdp.map_or(SdpNegotiator::default(), SdpNegotiator::with_local);
 
         let client_tsx = if let Some(transport) = transport {
-            ClientTransaction::send_request_with_target(request, endpoint.clone(), transport)
-                .await?
+            ClientTransaction::send_request_with_target(request, endpoint, transport).await?
         } else {
             ClientTransaction::send_request(request, endpoint).await?
         };
 
-        let state = Calling { client_tsx, dialog };
-
-        Ok(Self { state, negotiator })
+        Ok(Self {
+            state: Calling { client_tsx, dialog },
+            negotiator,
+        })
     }
 
     pub async fn receive_provisional(&mut self) -> Result<Option<IncomingResponse>> {
@@ -173,9 +165,10 @@ impl InviteSession<Incoming> {
         };
         let server_tsx = ServerTransaction::from_request(request, endpoint);
 
-        let state = Incoming { server_tsx, dialog };
-
-        Ok(Self { state, negotiator })
+        Ok(Self {
+            state: Incoming { server_tsx, dialog },
+            negotiator,
+        })
     }
 
     // RFC 3261 13.3.1.1
@@ -331,17 +324,16 @@ mod tests {
         let udp_transport = MockTransport::new_udp();
         let transport = (TransportHandle::new(udp_transport.clone()), targert_addr);
 
-        let params = InvitationParams {
-            from_uri: from_uri.clone(),
-            to_uri: to_uri.clone(),
-            contact: None,
-            local_sdp: None,
-            transport: Some(transport),
-        };
-
-        let session = InviteSession::send_invite(params, endpoint)
-            .await
-            .expect("Failed to create session by sending invite");
+        let session = InviteSession::send_invite(
+            from_uri.clone(),
+            to_uri.clone(),
+            None,
+            None,
+            Some(transport),
+            endpoint,
+        )
+        .await
+        .expect("Failed to create session by sending invite");
 
         let request = session.request();
 
