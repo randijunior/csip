@@ -25,18 +25,16 @@ use crate::{Endpoint, Error, IncomingRequest, IncomingResponse, OutgoingRequest,
 
 pub struct InviteSession<S> {
     state: S,
-    sdp_negotiator: SdpNegotiator,
+    negotiator: SdpNegotiator,
 }
 
 pub struct Incoming {
     dialog: Dialog,
-    endpoint: Endpoint,
     server_tsx: ServerTransaction,
 }
 
 pub struct Calling {
     dialog: Dialog,
-    endpoint: Endpoint,
     client_tsx: ClientTransaction,
 }
 
@@ -97,25 +95,18 @@ impl InviteSession<Calling> {
             request.body = Some(sip_body);
         }
 
-        let sdp_negotiator = local_sdp.map_or(SdpNegotiator::default(), SdpNegotiator::with_local);
+        let negotiator = local_sdp.map_or(SdpNegotiator::default(), SdpNegotiator::with_local);
 
         let client_tsx = if let Some(transport) = transport {
             ClientTransaction::send_request_with_target(request, endpoint.clone(), transport)
                 .await?
         } else {
-            ClientTransaction::send_request(request, endpoint.clone()).await?
+            ClientTransaction::send_request(request, endpoint).await?
         };
 
-        let state = Calling {
-            endpoint,
-            client_tsx,
-            dialog,
-        };
+        let state = Calling { client_tsx, dialog };
 
-        Ok(Self {
-            state,
-            sdp_negotiator,
-        })
+        Ok(Self { state, negotiator })
     }
 
     pub async fn receive_provisional(&mut self) -> Result<Option<IncomingResponse>> {
@@ -127,7 +118,6 @@ impl InviteSession<Calling> {
     pub async fn wait_answer(self) -> Result<InviteSession<Established>> {
         let Calling {
             mut dialog,
-            endpoint,
             client_tsx,
         } = self.state;
 
@@ -137,13 +127,15 @@ impl InviteSession<Calling> {
             // 13.2.2.4 2xx Responses
             200..=299 => {
                 let ack = dialog.create_request(SipMethod::Ack);
+                let endpoint = dialog.endpoint();
+
                 let mut outgoing = endpoint.create_outgoing_request(ack, None).await?;
 
                 endpoint.send_outgoing_request(&mut outgoing).await?;
 
                 Ok(InviteSession {
-                    state: Established::new(dialog, endpoint),
-                    sdp_negotiator: self.sdp_negotiator,
+                    state: Established::new(dialog),
+                    negotiator: self.negotiator,
                 })
             }
             // 13.2.2.2 3xx Responses
@@ -172,25 +164,18 @@ impl InviteSession<Incoming> {
             )));
         }
         let dialog = Dialog::create_uas(&request, contact, endpoint.clone())?;
-        let sdp_negotiator = if let Some(body) = &request.body {
+        let negotiator = if let Some(body) = &request.body {
             // EarlyOffer
             SdpNegotiator::with_remote(Self::get_sdp(body)?)
         } else {
             // DelayedOffer
             SdpNegotiator::default()
         };
-        let server_tsx = ServerTransaction::from_request(request, endpoint.clone());
+        let server_tsx = ServerTransaction::from_request(request, endpoint);
 
-        let state = Incoming {
-            server_tsx,
-            dialog,
-            endpoint,
-        };
+        let state = Incoming { server_tsx, dialog };
 
-        Ok(Self {
-            state,
-            sdp_negotiator,
-        })
+        Ok(Self { state, negotiator })
     }
 
     // RFC 3261 13.3.1.1
@@ -219,15 +204,14 @@ impl InviteSession<Incoming> {
         let Incoming {
             server_tsx,
             mut dialog,
-            endpoint,
         } = self.state;
 
         let mut sip_response = dialog.create_response(&server_tsx, status_code, reason_phrase);
 
         let offer = {
-            self.sdp_negotiator.set_local_sdp(local_sdp)?;
+            self.negotiator.set_local_offer(local_sdp)?;
 
-            let answer = self.sdp_negotiator.create_answer()?;
+            let answer = self.negotiator.generate_answer()?;
             let sdp_str = answer.encode_sdp()?;
 
             SipBody::from(bytes::Bytes::from(sdp_str))
@@ -240,8 +224,8 @@ impl InviteSession<Incoming> {
         let _ack = dialog.wait_for_ack().await?;
 
         Ok(InviteSession {
-            state: Established::new(dialog, endpoint),
-            sdp_negotiator: self.sdp_negotiator,
+            state: Established::new(dialog),
+            negotiator: self.negotiator,
         })
     }
 }
@@ -254,11 +238,11 @@ impl<S> InviteSession<S> {
 }
 
 impl Established {
-    fn new(dialog: Dialog, endpoint: Endpoint) -> Self {
+    fn new(dialog: Dialog) -> Self {
         let (tx, rx) = mpsc::channel::<InviteSessionEvent>(10);
 
         tokio::spawn(async move {
-            if let Err(err) = Self::session_loop(dialog, endpoint, tx).await {
+            if let Err(err) = Self::session_loop(dialog, tx).await {
                 log::error!("Failed to handle dialog msg: {}", err);
             }
         });
@@ -266,11 +250,7 @@ impl Established {
         Self { rx }
     }
 
-    async fn session_loop(
-        mut dialog: Dialog,
-        endpoint: Endpoint,
-        tx: mpsc::Sender<InviteSessionEvent>,
-    ) -> Result<()> {
+    async fn session_loop(mut dialog: Dialog, tx: mpsc::Sender<InviteSessionEvent>) -> Result<()> {
         while let Ok(request) = dialog.receive_request().await {
             match request.req_line.method {
                 SipMethod::Invite => {
@@ -280,6 +260,7 @@ impl Established {
                     break;
                 }
                 SipMethod::Bye => {
+                    let endpoint = dialog.endpoint().clone();
                     let bye_tsx = ServerTransaction::from_request(request, endpoint);
                     dialog.final_response(bye_tsx, StatusCode::Ok).await?;
 

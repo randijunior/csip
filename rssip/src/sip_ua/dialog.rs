@@ -360,6 +360,10 @@ impl Dialog {
 
         Ok(())
     }
+
+    pub(crate) fn endpoint(&self) -> &Endpoint {
+        &self.endpoint
+    }
 }
 
 impl Drop for Dialog {
