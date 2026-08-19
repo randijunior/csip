@@ -209,9 +209,9 @@ impl InviteSession<Incoming> {
         let mut sip_response = dialog.create_response(&server_tsx, status_code, reason_phrase);
 
         let offer = {
-            self.negotiator.set_local_offer(local_sdp)?;
+            self.negotiator.set_local_sdp(local_sdp)?;
 
-            let answer = self.negotiator.generate_answer()?;
+            let answer = self.negotiator.create_answer()?;
             let sdp_str = answer.encode_sdp()?;
 
             SipBody::from(bytes::Bytes::from(sdp_str))
@@ -262,6 +262,7 @@ impl Established {
                 SipMethod::Bye => {
                     let endpoint = dialog.endpoint().clone();
                     let bye_tsx = ServerTransaction::from_request(request, endpoint);
+                    
                     dialog.final_response(bye_tsx, StatusCode::Ok).await?;
 
                     tx.send(InviteSessionEvent::Terminated(Cause::ByeReceived))
