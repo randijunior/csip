@@ -5,6 +5,7 @@ use media::sdp::SessionDescription;
 use media::sdp::negotiator::SdpNegotiator;
 use media::sdp::parser::SdpParser;
 use tokio::sync::mpsc;
+use utils::encode::Encode;
 
 use crate::message::headers::{Contact, ContentType, Header};
 use crate::message::method::SipMethod;
@@ -78,9 +79,9 @@ impl InviteSession<Calling> {
         }
 
         if let Some(sdp) = &local_sdp {
-            let encoded = sdp.encode_sdp()?;
+            let encoded = sdp.encode()?;
             let sip_body = SipBody::from(bytes::Bytes::from(encoded));
-            
+
             request
                 .headers
                 .push(Header::ContentType(ContentType::new_sdp()));
@@ -203,9 +204,9 @@ impl InviteSession<Incoming> {
             self.negotiator.set_local_sdp(local_sdp)?;
 
             let answer = self.negotiator.create_answer()?;
-            let sdp_str = answer.encode_sdp()?;
+            let sdp = answer.encode()?;
 
-            SipBody::from(bytes::Bytes::from(sdp_str))
+            SipBody::from(bytes::Bytes::from(sdp))
         };
 
         sip_response.body = Some(offer);

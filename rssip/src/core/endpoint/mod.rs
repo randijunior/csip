@@ -12,6 +12,7 @@ use std::sync::Arc;
 pub use builder::EndpointBuilder;
 use bytes::Bytes;
 pub use plugin::{Plugin, ToTake};
+use utils::encode::Encode;
 
 use self::plugin::Plugins;
 use super::resolver::{LookupAddress, SipHost};
@@ -25,7 +26,7 @@ use crate::sip_ua::dialog::DialogPlugin;
 use crate::transaction::TsxPlugin;
 use crate::transport::incoming::{IncomingRequest, IncomingResponse};
 use crate::transport::outgoing::{
-    Encode, OutgoingDestInfo, OutgoingRequest, OutgoingResponse, TargetTransportInfo,
+    OutgoingDestInfo, OutgoingRequest, OutgoingResponse, TargetTransportInfo,
 };
 use crate::transport::{TransportHandle, TransportLayer};
 

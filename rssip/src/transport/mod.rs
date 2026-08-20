@@ -20,7 +20,7 @@ use std::result::Result as StdResult;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
-use std::{fmt, io, ops};
+use std::{io, ops};
 
 use async_trait::async_trait;
 use bytes::Bytes;

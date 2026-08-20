@@ -4,6 +4,7 @@ use crate::error::Error;
 
 pub mod negotiator;
 pub mod parser;
+mod util;
 
 pub type Uri = String;
 
@@ -42,81 +43,13 @@ pub struct SessionDescription {
     pub media: Vec<MediaDescription>,
 }
 
-impl SessionDescription {
-    pub fn set_origin(&mut self, origin: Origin) {
-        self.origin = origin;
-    }
+impl utils::encode::Encode for SessionDescription {
+    type Buffer = Vec<u8>;
 
-    pub fn set_name(&mut self, session_name: SessionName) {
-        self.session_name = session_name;
-    }
+    fn encode(&self) -> std::io::Result<Self::Buffer> {
+        use std::io::Write;
 
-    pub fn set_information(&mut self, info: SessionInformation) {
-        if let Some(media) = self.last_media_desc_mut() {
-            media.title = Some(info);
-        } else {
-            self.session_information = Some(info);
-        }
-    }
-
-    pub fn set_email_addr(&mut self, email: EmailAddress) {
-        self.email_address = Some(email);
-    }
-
-    pub fn set_uri(&mut self, uri: Uri) {
-        self.uri = Some(uri);
-    }
-
-    pub fn set_attr(&mut self, attr: Attribute) {
-        if let Some(media) = self.last_media_desc_mut() {
-            media.attributes.push(attr);
-        } else {
-            self.attributes.push(attr);
-        }
-    }
-
-    pub fn set_bandwidth_information(&mut self, bandwidth: BandwidthInformation) {
-        self.bandwidth_information.push(bandwidth);
-    }
-
-    pub fn set_media_description(&mut self, media: MediaDescription) {
-        self.media.push(media);
-    }
-
-    pub fn last_media_desc_mut(&mut self) -> Option<&mut MediaDescription> {
-        self.media.last_mut()
-    }
-
-    fn last_time_desc_mut(&mut self) -> Option<&mut TimeDescription> {
-        self.time.last_mut()
-    }
-
-    pub fn set_time_desc(&mut self, time: TimeDescription) {
-        self.time.push(time);
-    }
-    pub fn set_repeat_times(&mut self, time: RepeatTimes) -> Result<(), Error> {
-        if let Some(timing) = self.last_time_desc_mut() {
-            timing.repeat_times.push(time);
-            Ok(())
-        } else {
-            Err(Error::SdpTimeDescriptionNotFound)
-        }
-    }
-    pub fn set_phone(&mut self, phone: PhoneNumber) {
-        self.phone_number = Some(phone);
-    }
-    pub fn set_connection(&mut self, conn: ConnectionInformation) {
-        if let Some(media) = self.last_media_desc_mut() {
-            media.connection_information = Some(conn);
-        } else {
-            self.connection_information = Some(conn);
-        }
-    }
-
-    pub fn encode_sdp(&self) -> Result<String, std::fmt::Error> {
-        use std::fmt::Write;
-
-        let mut buff = String::new();
+        let mut buff = Vec::new();
 
         // v=0
         write!(&mut buff, "v=0\r\n")?;
@@ -263,8 +196,9 @@ pub struct RepeatTimes {
     pub offsets: Vec<i64>,
 }
 
-#[derive(Clone)]
+#[derive(Default, Clone)]
 pub enum AddrType {
+    #[default]
     IP4,
     IP6,
 }
@@ -280,8 +214,9 @@ impl fmt::Display for AddrType {
     }
 }
 
-#[derive(Clone)]
+#[derive(Default, Clone)]
 pub enum NetType {
+    #[default]
     IN,
     Other(String),
 }
@@ -352,8 +287,8 @@ pub struct Origin {
     pub user: String,
     pub session_id: u64,
     pub session_version: u64,
-    pub nettype: String,
-    pub addrtype: String,
+    pub nettype: NetType,
+    pub addrtype: AddrType,
     pub unicast_address: String,
 }
 
@@ -432,10 +367,96 @@ pub struct RtpMap {
 }
 
 #[derive(Debug, PartialEq, Eq, Default)]
-pub enum MediaDirection {
+pub enum Direction {
+    Unspecified,
     #[default]
     SendRecv,
     RecvOnly,
     SendOnly,
     Inactive,
+}
+
+impl fmt::Display for Direction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Direction::SendRecv => "sendrecv",
+            Direction::SendOnly => "sendonly",
+            Direction::RecvOnly => "recvonly",
+            Direction::Inactive => "inactive",
+            _ => "Unspecified",
+        };
+        write!(f, "{s}")
+    }
+}
+
+impl SessionDescription {
+    pub fn set_origin(&mut self, origin: Origin) {
+        self.origin = origin;
+    }
+
+    pub fn set_name(&mut self, session_name: SessionName) {
+        self.session_name = session_name;
+    }
+
+    pub fn set_information(&mut self, info: SessionInformation) {
+        if let Some(media) = self.last_media_desc_mut() {
+            media.title = Some(info);
+        } else {
+            self.session_information = Some(info);
+        }
+    }
+
+    pub fn set_email_addr(&mut self, email: EmailAddress) {
+        self.email_address = Some(email);
+    }
+
+    pub fn set_uri(&mut self, uri: Uri) {
+        self.uri = Some(uri);
+    }
+
+    pub fn set_attr(&mut self, attr: Attribute) {
+        if let Some(media) = self.last_media_desc_mut() {
+            media.attributes.push(attr);
+        } else {
+            self.attributes.push(attr);
+        }
+    }
+
+    pub fn set_bandwidth_information(&mut self, bandwidth: BandwidthInformation) {
+        self.bandwidth_information.push(bandwidth);
+    }
+
+    pub fn set_media_description(&mut self, media: MediaDescription) {
+        self.media.push(media);
+    }
+
+    pub fn last_media_desc_mut(&mut self) -> Option<&mut MediaDescription> {
+        self.media.last_mut()
+    }
+
+    fn last_time_desc_mut(&mut self) -> Option<&mut TimeDescription> {
+        self.time.last_mut()
+    }
+
+    pub fn set_time_desc(&mut self, time: TimeDescription) {
+        self.time.push(time);
+    }
+    pub fn set_repeat_times(&mut self, time: RepeatTimes) -> Result<(), Error> {
+        if let Some(timing) = self.last_time_desc_mut() {
+            timing.repeat_times.push(time);
+            Ok(())
+        } else {
+            Err(Error::SdpTimeDescriptionNotFound)
+        }
+    }
+    pub fn set_phone(&mut self, phone: PhoneNumber) {
+        self.phone_number = Some(phone);
+    }
+    pub fn set_connection(&mut self, conn: ConnectionInformation) {
+        if let Some(media) = self.last_media_desc_mut() {
+            media.connection_information = Some(conn);
+        } else {
+            self.connection_information = Some(conn);
+        }
+    }
 }

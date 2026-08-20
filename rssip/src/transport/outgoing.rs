@@ -1,11 +1,11 @@
 use core::fmt;
-use std::io::Write;
+use std::io::{Result as IoResult, Write};
 use std::net::SocketAddr;
 use std::ops;
 
 use bytes::{BufMut, Bytes, BytesMut};
+use utils::encode::Encode;
 
-use crate::error::Result;
 use crate::message::headers::ContentLength;
 use crate::message::uri::HostPort;
 use crate::message::{Request, Response, SipBody};
@@ -30,6 +30,15 @@ pub struct OutgoingResponse {
     pub(crate) dest_info: OutgoingDestInfo,
     /// Message encoded representation.
     pub(crate) encoded: Bytes,
+}
+
+/// Outgoing message info.
+#[derive(Clone)]
+pub struct TargetTransportInfo {
+    /// The socket this message should be sent to.
+    pub socket_addr: SocketAddr,
+    /// The transport to use for sending the message.
+    pub transport: TransportHandle,
 }
 
 #[derive(Clone)]
@@ -83,27 +92,11 @@ impl ops::DerefMut for OutgoingResponse {
         &mut self.response
     }
 }
-/// Outgoing message info.
-#[derive(Clone)]
-pub struct TargetTransportInfo {
-    /// The socket this message should be sent to.
-    pub socket_addr: SocketAddr,
-    /// The transport to use for sending the message.
-    pub transport: TransportHandle,
-}
-
-/// Trait for converting a type into into a buffer.
-pub trait Encode {
-    /// The buffer type that holds the encoded data.
-    type Buffer: AsRef<[u8]>;
-    /// Converts the type into a byte buffer.
-    fn encode(&self) -> Result<Self::Buffer>;
-}
 
 impl Encode for OutgoingResponse {
     type Buffer = Bytes;
 
-    fn encode(&self) -> Result<Self::Buffer> {
+    fn encode(&self) -> IoResult<Self::Buffer> {
         let response = &self.response;
         let buf = BytesMut::new();
         let mut writer = buf.writer();
@@ -124,7 +117,7 @@ impl Encode for OutgoingResponse {
 impl Encode for OutgoingRequest {
     type Buffer = Bytes;
 
-    fn encode(&self) -> Result<Self::Buffer> {
+    fn encode(&self) -> IoResult<Self::Buffer> {
         let request = &self.request;
         let buf = BytesMut::new();
         let mut writer = buf.writer();
@@ -137,7 +130,7 @@ impl Encode for OutgoingRequest {
     }
 }
 
-fn write_body<W: Write>(writer: &mut W, body: Option<&SipBody>) -> Result<()> {
+fn write_body<W: Write>(writer: &mut W, body: Option<&SipBody>) -> IoResult<()> {
     const CONTENT_LENGTH: &str = ContentLength::NAME;
     if let Some(body) = body {
         write!(writer, "{CONTENT_LENGTH}: {}\r\n", body.len())?;

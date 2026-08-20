@@ -2,6 +2,7 @@
 
 //! This lib provide several utilities for use in the `rssip` project.
 
+pub mod encode;
 pub mod local_ip;
 pub mod lookup_table;
 pub mod one;

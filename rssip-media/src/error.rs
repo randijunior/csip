@@ -31,6 +31,9 @@ pub enum ParseSdpError {
     #[error("unknow media type")]
     SdpUnknowMediaType,
 
+    #[error("unknow addr type")]
+    SdpUnknowAddrType,
+
     #[error("unknow sdp transport protocol")]
     SdpUnknowTransport,
 

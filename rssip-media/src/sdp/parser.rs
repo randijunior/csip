@@ -146,9 +146,16 @@ impl<'buf> SdpParser<'buf> {
         self.handle_ws();
         let session_version = self.scanner.scan_u64()?;
         self.handle_ws();
-        let nettype = self.scanner.scan_until_as_str(b' ')?.to_owned();
+        let nettype = match self.scanner.scan_until_as_str(b' ')? {
+            "IN" => NetType::IN,
+            other => NetType::Other(other.to_owned()),
+        };
         self.handle_ws();
-        let addrtype = self.scanner.scan_until_as_str(b' ')?.to_owned();
+        let addrtype = match self.scanner.scan_until_as_str(b' ')? {
+            "IP4" => AddrType::IP4,
+            "IP6" => AddrType::IP6,
+            _ => return Err(ParseSdpError::SdpUnknowAddrType.into()),
+        };
         self.handle_ws();
         let unicast_address = self.scanner.scan_until_any_as_str(b" \t\r\n")?.to_owned();
         self.handle_ws();
