@@ -12,7 +12,7 @@ pub mod message;
 pub(crate) mod parser;
 pub mod sip_ua;
 pub mod transaction;
-pub(crate) mod transport;
+pub mod transport;
 
 pub use core::endpoint::Endpoint;
 pub use core::{endpoint, resolver};

@@ -231,7 +231,7 @@ impl Endpoint {
             protocol: Some(proto),
         };
 
-        let addresses = self.transports().resolver().resolve(&domain).await?;
+        let addresses = self.transport_layer().resolver().resolve(&domain).await?;
 
         for addr in addresses {
             let LookupAddress {
@@ -239,7 +239,7 @@ impl Endpoint {
                 protocol,
             } = addr;
             let transport = match self
-                .transports()
+                .transport_layer()
                 .select_transport(socket_addr, protocol)
                 .await
             {
@@ -380,7 +380,7 @@ impl Endpoint {
                 target
             } else {
                 let new_request_uri = self.process_route_set(&mut request);
-                let addrs = self.transports().resolve_uri(&new_request_uri).await?;
+                let addrs = self.transport_layer().resolve_uri(&new_request_uri).await?;
 
                 for addr in addrs {
                     let LookupAddress {
@@ -389,7 +389,7 @@ impl Endpoint {
                     } = addr;
 
                     match self
-                        .transports()
+                        .transport_layer()
                         .select_transport(socket_addr, protocol)
                         .await
                     {
@@ -484,7 +484,7 @@ impl Endpoint {
         }
     }
 
-    pub(crate) fn transports(&self) -> &TransportLayer {
+    pub fn transport_layer(&self) -> &TransportLayer {
         &self.inner.transport
     }
 

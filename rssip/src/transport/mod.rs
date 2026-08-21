@@ -62,13 +62,6 @@ pub struct TransportLayer {
     transports: Arc<Mutex<rustc_hash::FxHashMap<TransportKey, TransportHandle>>>,
 }
 
-/// A wrapper around a SIP transport implementation.
-#[derive(Clone)]
-pub struct TransportHandle {
-    /// Shared transport instance.
-    shared: Arc<dyn SipTransport>,
-}
-
 /// Trait for all SIP transport implementations.
 #[async_trait]
 pub trait SipTransport: Send + Sync + 'static {
@@ -100,6 +93,13 @@ pub trait SipTransport: Send + Sync + 'static {
     fn key(&self) -> TransportKey {
         TransportKey::from(self)
     }
+}
+
+/// A wrapper around a SIP transport implementation.
+#[derive(Clone)]
+pub struct TransportHandle {
+    /// Shared transport instance.
+    shared: Arc<dyn SipTransport>,
 }
 
 /// Unique key for a transport instance.
@@ -150,29 +150,15 @@ pub struct TransportMessage {
 }
 
 impl TransportLayer {
-    pub fn new(endpoint: WeakEndpointHandle) -> Self {
+    pub(crate) fn new(endpoint: WeakEndpointHandle) -> Self {
         Self {
             endpoint,
             transports: Default::default(),
-            resolver: DomainResolver::from(DefaultResolver),
+            resolver: DefaultResolver.into(),
         }
     }
 
-    /// Add a new transport to the transports.
-    pub fn register_transport(&self, key: TransportKey, value: TransportHandle) {
-        self.insert(key, value);
-    }
-
-    /// Remove a transport by its key.
-    pub fn remove_transport(&self, key: &TransportKey) {
-        self.remove(key);
-    }
-
-    pub fn get_transport(&self, key: &TransportKey) -> Option<TransportHandle> {
-        self.get(key)
-    }
-
-    pub async fn select_transport(
+    pub(crate) async fn select_transport(
         &self,
         socket_addr: SocketAddr,
         protocol: TransportProtocol,
@@ -197,6 +183,58 @@ impl TransportLayer {
         } else {
             Err(Error::UnsupportedTransport)
         }
+    }
+
+    /// Add a new transport to the transports.
+    pub(crate) fn register_transport(&self, key: TransportKey, value: TransportHandle) {
+        let mut map = self.transports.lock().expect("Lock failed");
+
+        map.insert(key, value);
+    }
+
+    /// Remove a transport by its key.
+    pub(crate) fn remove_transport(&self, key: &TransportKey) {
+        let mut map = self.transports.lock().expect("Lock failed");
+
+        map.remove(key);
+    }
+
+    pub(crate) fn get_transport(&self, key: &TransportKey) -> Option<TransportHandle> {
+        let map = self.transports.lock().expect("Lock failed");
+
+        if let Some(transport) = map.get(key) {
+            return Some(transport.clone());
+        }
+
+        if key.protocol.is_unreliable() {
+            let target_ip = key.socket_addr.ip();
+            let target_proto = key.protocol;
+
+            let existing = map.values().find(|transport| {
+                let ip = transport.local_addr().ip();
+
+                transport.protocol() == target_proto
+                    && matches!(
+                        (ip, target_ip),
+                        (IpAddr::V4(_), IpAddr::V4(_)) | (IpAddr::V6(_), IpAddr::V6(_))
+                    )
+            });
+
+            if let Some(transport) = existing {
+                return Some(transport.clone());
+            }
+        }
+
+        None
+    }
+
+    pub fn find_transport_by_protocol(&self, proto: TransportProtocol) -> Option<TransportHandle> {
+        self.transports
+            .lock()
+            .expect("Lock failed")
+            .values()
+            .find(|transport| transport.protocol() == proto)
+            .cloned()
     }
 
     // RFC 3263 Section 4
@@ -284,48 +322,6 @@ impl TransportLayer {
 
     pub fn resolver(&self) -> &DomainResolver {
         &self.resolver
-    }
-
-    fn insert(&self, key: TransportKey, value: TransportHandle) {
-        let mut map = self.transports.lock().expect("Lock failed");
-
-        map.insert(key, value);
-    }
-
-    /// Remove a transport by its key.
-    fn remove(&self, key: &TransportKey) {
-        let mut map = self.transports.lock().expect("Lock failed");
-
-        map.remove(key);
-    }
-
-    fn get(&self, key: &TransportKey) -> Option<TransportHandle> {
-        let map = self.transports.lock().expect("Lock failed");
-
-        if let Some(transport) = map.get(key) {
-            return Some(transport.clone());
-        }
-
-        if key.protocol.is_unreliable() {
-            let target_ip = key.socket_addr.ip();
-            let target_proto = key.protocol;
-
-            let existing = map.values().find(|transport| {
-                let ip = transport.local_addr().ip();
-
-                transport.protocol() == target_proto
-                    && matches!(
-                        (ip, target_ip),
-                        (IpAddr::V4(_), IpAddr::V4(_)) | (IpAddr::V6(_), IpAddr::V6(_))
-                    )
-            });
-
-            if let Some(transport) = existing {
-                return Some(transport.clone());
-            }
-        }
-
-        None
     }
 }
 
