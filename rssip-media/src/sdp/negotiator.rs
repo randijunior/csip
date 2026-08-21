@@ -227,8 +227,7 @@ impl MediaStreamBuilder {
 
 #[cfg(test)]
 mod tests {
-
-    use super::*;
+use super::*;
     use crate::sdp::parser::SdpParser;
 
     #[test]
@@ -274,8 +273,6 @@ mod tests {
 
         nego.add_local_media_stream(media_stream);
 
-        let answer = nego.create_answer().unwrap();
-
-        println!("{}", answer.encode_sdp().unwrap());
+        let _answer = nego.create_answer().unwrap();
     }
 }

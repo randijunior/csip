@@ -7,7 +7,7 @@ pub struct MediaSession {
 
     codecs: Codecs,
 
-    dir: sdp::MediaDirection, // local_addr: IpAddr
+    dir: sdp::Direction, // local_addr: IpAddr
                               // remote_addr: IpAddr
 }
 
