@@ -85,21 +85,17 @@ impl Session<Calling> {
             request.headers.push(Header::Supported(supported.clone()));
         }
 
-        let negotiator = if let Some(sdp) = sdp_params {
-            let mut nego = Negotiator::default();
+        let mut negotiator = Negotiator::default();
 
-            let sdp = nego.generate_offer(sdp).encode()?;
+        if let Some(sdp) = sdp_params {
+            let sdp = negotiator.generate_offer(sdp).encode()?;
             let sip_body = SipBody::from(bytes::Bytes::from(sdp));
 
             request
                 .headers
                 .push(Header::ContentType(ContentType::new_sdp()));
             request.body = Some(sip_body);
-
-            nego
-        } else {
-            Negotiator::default()
-        };
+        }
 
         let client_tsx = ClientTransaction::send_request(request, endpoint).await?;
 
