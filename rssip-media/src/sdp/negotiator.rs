@@ -83,145 +83,144 @@ impl Negotiator {
     }
 
     // RFC 3264 5 - Generating the Initial Offer
-    pub fn generate_offer(&mut self, params: SdpOfferParams) -> &SessionDescription {
+    pub fn create_offer(&mut self, params: SdpOfferParams) -> Result<SessionDescription> {
         // the set of media streams and codecs the
         // offerer wishes to use, along with the IP addresses and ports the
         // offerer would like to use to receive the media.
 
         // an SDP message used in the offer/answer model MUST
         // contain exactly one session description.
-        let offer_ref = &*self.local_offer.get_or_insert_with(|| {
-            let mut media: Vec<MediaDescription> = params
-                .media_streams
-                .into_iter()
-                .map(|media_stream| {
-                    let mut media_formats = vec![];
-                    let mut attributes = vec![];
-
-                    for codec in media_stream.codecs.iter() {
-                        match codec.name() {
-                            "PCMU" => {
-                                attributes.push(Attribute {
-                                    name: "rtpmap".to_owned(),
-                                    value: Some("0 PCMU/8000".to_owned()),
-                                });
-                            }
-                            "PCMA" => {
-                                attributes.push(Attribute {
-                                    name: "rtpmap".to_owned(),
-                                    value: Some("8 PCMA/8000".to_owned()),
-                                });
-                            }
-                            "opus" => {
-                                attributes.push(Attribute {
-                                    name: "rtpmap".to_owned(),
-                                    value: Some("96 opus/48000/2".to_owned()),
-                                });
-                            }
-                            "telephone-event" => {
-                                attributes.push(Attribute {
-                                    name: "rtpmap".to_owned(),
-                                    value: Some("101 telephone-event/8000".to_owned()),
-                                });
-                                attributes.push(Attribute {
-                                    name: "fmtp".to_owned(),
-                                    value: Some("101 0-16".to_owned()),
-                                });
-                            }
-                            _ => {
-                                attributes.push(Attribute {
-                                    name: "rtpmap".to_owned(),
-                                    value: Some(format!(
-                                        "{}/{}/{}/{}/",
-                                        codec.pt(),
-                                        codec.name(),
-                                        codec.clock_rate(),
-                                        codec.channels()
-                                    )),
-                                });
-                            }
-                        }
-                        media_formats.push(codec.pt().to_string());
-                    }
-
-                    MediaDescription {
-                        media_type: media_stream.media_type,
-                        proto: media_stream.transport,
-                        port: media_stream.port,
-                        number_of_ports: None,
-                        media_formats,
-                        title: None,
-                        connection_information: None,
-                        bandwidth_information: vec![],
-                        attributes,
-                    }
-                })
-                .collect();
-
-            if let Some(m) = media.last_mut() {
-                m.attributes.push(Attribute {
-                    name: "ptime".to_owned(),
-                    value: Some("20".to_owned()),
-                });
-
-                m.attributes.push(Attribute {
-                    name: "maxptime".to_owned(),
-                    value: Some("150".to_owned()),
-                });
-
-                m.attributes.push(Attribute {
-                    name: params.direction.to_string(),
-                    value: None,
-                });
-            }
-
-            SessionDescription {
-                origin: Origin {
-                    user: "-".to_owned(),
-                    session_id: rand::random::<u64>(),
-                    session_version: rand::random::<u64>(),
-                    nettype: NetType::IN,
-                    addrtype: if params.origin_ip.is_ipv4() {
-                        AddrType::IP4
-                    } else {
-                        AddrType::IP6
-                    },
-                    unicast_address: params.origin_ip,
-                },
-                session_name: "-".to_owned(),
-                session_information: None,
-                uri: None,
-                email_address: None,
-                phone_number: None,
-                connection_information: Some(ConnectionInformation {
-                    nettype: NetType::IN,
-                    addrtype: if params.origin_ip.is_ipv4() {
-                        AddrType::IP4
-                    } else {
-                        AddrType::IP6
-                    },
-                    conection_address: params.origin_ip,
-                }),
-                bandwidth_information: vec![],
-                attributes: vec![],
-                time: vec![TimeDescription {
-                    time_active: TimeActive {
-                        start_time: 0,
-                        stop_time: 0,
-                    },
-                    repeat_times: vec![],
-                }],
-                media,
-            }
-        });
-        if self.state != NegotiationState::LocalOffer {
-            self.state = NegotiationState::LocalOffer;
+        if self.state != NegotiationState::Initial {
+            return Err(Error::ErrInvalidNegoState);
         }
-        offer_ref
+
+        let mut media: Vec<MediaDescription> = params
+            .media_streams
+            .into_iter()
+            .map(|media_stream| {
+                let mut media_formats = vec![];
+                let mut attributes = vec![];
+
+                for codec in media_stream.codecs.iter() {
+                    match codec.name() {
+                        "PCMU" => {
+                            attributes.push(Attribute {
+                                name: "rtpmap".to_owned(),
+                                value: Some("0 PCMU/8000".to_owned()),
+                            });
+                        }
+                        "PCMA" => {
+                            attributes.push(Attribute {
+                                name: "rtpmap".to_owned(),
+                                value: Some("8 PCMA/8000".to_owned()),
+                            });
+                        }
+                        "opus" => {
+                            attributes.push(Attribute {
+                                name: "rtpmap".to_owned(),
+                                value: Some("96 opus/48000/2".to_owned()),
+                            });
+                        }
+                        "telephone-event" => {
+                            attributes.push(Attribute {
+                                name: "rtpmap".to_owned(),
+                                value: Some("101 telephone-event/8000".to_owned()),
+                            });
+                            attributes.push(Attribute {
+                                name: "fmtp".to_owned(),
+                                value: Some("101 0-16".to_owned()),
+                            });
+                        }
+                        _ => {
+                            attributes.push(Attribute {
+                                name: "rtpmap".to_owned(),
+                                value: Some(format!(
+                                    "{}/{}/{}/{}/",
+                                    codec.pt(),
+                                    codec.name(),
+                                    codec.clock_rate(),
+                                    codec.channels()
+                                )),
+                            });
+                        }
+                    }
+                    media_formats.push(codec.pt().to_string());
+                }
+
+                MediaDescription {
+                    media_type: media_stream.media_type,
+                    proto: media_stream.transport,
+                    port: media_stream.port,
+                    number_of_ports: None,
+                    media_formats,
+                    title: None,
+                    connection_information: None,
+                    bandwidth_information: vec![],
+                    attributes,
+                }
+            })
+            .collect();
+
+        if let Some(m) = media.last_mut() {
+            m.attributes.push(Attribute {
+                name: "ptime".to_owned(),
+                value: Some("20".to_owned()),
+            });
+
+            m.attributes.push(Attribute {
+                name: "maxptime".to_owned(),
+                value: Some("150".to_owned()),
+            });
+
+            m.attributes.push(Attribute {
+                name: params.direction.to_string(),
+                value: None,
+            });
+        }
+
+        let offer = SessionDescription {
+            origin: Origin {
+                user: "-".to_owned(),
+                session_id: rand::random::<u64>(),
+                session_version: rand::random::<u64>(),
+                nettype: NetType::IN,
+                addrtype: if params.origin_ip.is_ipv4() {
+                    AddrType::IP4
+                } else {
+                    AddrType::IP6
+                },
+                unicast_address: params.origin_ip,
+            },
+            session_name: "-".to_owned(),
+            session_information: None,
+            uri: None,
+            email_address: None,
+            phone_number: None,
+            connection_information: Some(ConnectionInformation {
+                nettype: NetType::IN,
+                addrtype: if params.origin_ip.is_ipv4() {
+                    AddrType::IP4
+                } else {
+                    AddrType::IP6
+                },
+                conection_address: params.origin_ip,
+            }),
+            bandwidth_information: vec![],
+            attributes: vec![],
+            time: vec![TimeDescription {
+                time_active: TimeActive {
+                    start_time: 0,
+                    stop_time: 0,
+                },
+                repeat_times: vec![],
+            }],
+            media,
+        };
+        Ok(offer)
     }
 
     // RFC 3264 6 - Generating the Answer
-    pub fn generate_answer(&mut self) -> Result<&SessionDescription> {
+    pub fn create_answer(&mut self) -> Result<&SessionDescription> {
         if self.state != NegotiationState::Ready {
             return Err(Error::ErrInvalidNegoState);
         };
@@ -421,7 +420,7 @@ mod tests {
 
         nego.set_local_offer(local_sdp).unwrap();
 
-        let _answer = nego.generate_answer().unwrap();
+        let _answer = nego.create_answer().unwrap();
     }
 
     #[test]
@@ -438,7 +437,7 @@ mod tests {
         let offer = SdpOfferParams::new("192.168.178.54".parse().unwrap(), Direction::SendRecv)
             .add_media_stream(audio);
 
-        let offer = negotiator.generate_offer(offer);
+        let offer = negotiator.create_offer(offer).unwrap();
 
         println!("{}", offer.encode().unwrap());
     }

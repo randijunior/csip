@@ -88,7 +88,7 @@ impl Session<Calling> {
         let mut negotiator = Negotiator::default();
 
         if let Some(sdp) = sdp_params {
-            let sdp = negotiator.generate_offer(sdp).encode()?;
+            let sdp = negotiator.create_offer(sdp)?.encode()?;
             let sip_body = SipBody::from(bytes::Bytes::from(sdp));
 
             request
@@ -204,12 +204,13 @@ impl Session<Incoming> {
         let mut sip_response = dialog.create_response(&server_tsx, status_code, reason_phrase);
 
         let offer = {
-            let _offer = self.negotiator.generate_offer(sdp_params);
+            let local = self.negotiator.create_offer(sdp_params)?;
 
-            let answer = self.negotiator.generate_answer()?;
-            let sdp = answer.encode()?;
+            self.negotiator.set_local_offer(local)?;
 
-            SipBody::from(bytes::Bytes::from(sdp))
+            let answer = self.negotiator.create_answer()?;
+
+            SipBody::from(bytes::Bytes::from(answer.encode()?))
         };
 
         sip_response.body = Some(offer);
