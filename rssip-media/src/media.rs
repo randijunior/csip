@@ -1,24 +1,16 @@
+use std::net::{IpAddr, SocketAddr};
+
 use crate::codec::Codec;
-use crate::sdp;
+use crate::sdp::{Direction, MediaType, SdpTransport};
 
 pub struct MediaSession {
+    session_name: String,
     session_id: u64,
     session_version: u64,
+    session_onwer: String,
 
-    codecs: Codecs,
+    local_addr: IpAddr,
+    remote_addr: Option<IpAddr>,
 
-    dir: sdp::Direction, // local_addr: IpAddr
-                              // remote_addr: IpAddr
-}
-
-#[derive(Default)]
-pub struct Codecs {
-    media_type: sdp::MediaType,
-    codecs: Vec<Codec>,
-}
-
-impl Codecs {
-    pub fn push(&mut self, codec: Codec) {
-        self.codecs.push(codec);
-    }
+    direction: Direction,
 }

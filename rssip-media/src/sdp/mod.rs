@@ -1,10 +1,10 @@
 use std::fmt::{self, Formatter, Result as FmtResult};
+use std::net::IpAddr;
 
 use crate::error::Error;
 
 pub mod negotiator;
 pub mod parser;
-mod util;
 
 pub type Uri = String;
 
@@ -16,7 +16,7 @@ pub type EmailAddress = String;
 
 pub type PhoneNumber = String;
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 pub struct SessionDescription {
     // v=  (proto version)
     // o=  (originator and session identifier)
@@ -44,12 +44,13 @@ pub struct SessionDescription {
 }
 
 impl utils::encode::Encode for SessionDescription {
-    type Buffer = Vec<u8>;
+    type Buffer = String;
+    type Error = std::fmt::Error;
 
-    fn encode(&self) -> std::io::Result<Self::Buffer> {
-        use std::io::Write;
+    fn encode(&self) -> Result<Self::Buffer, Self::Error> {
+        use std::fmt::Write;
 
-        let mut buff = Vec::new();
+        let mut buff = String::new();
 
         // v=0
         write!(&mut buff, "v=0\r\n")?;
@@ -179,7 +180,7 @@ impl utils::encode::Encode for SessionDescription {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TimeDescription {
     // t=  (time the session is active)
     pub time_active: TimeActive,
@@ -189,14 +190,14 @@ pub struct TimeDescription {
     pub repeat_times: Vec<RepeatTimes>, // z=* (optional time zone offset line)
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RepeatTimes {
     pub repeat_interval: i64,
     pub active_duration: i64,
     pub offsets: Vec<i64>,
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 pub enum AddrType {
     #[default]
     IP4,
@@ -214,7 +215,7 @@ impl fmt::Display for AddrType {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 pub enum NetType {
     #[default]
     IN,
@@ -232,20 +233,20 @@ impl fmt::Display for NetType {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ConnectionInformation {
     pub nettype: NetType,
     pub addrtype: AddrType,
-    pub conection_address: String,
+    pub conection_address: IpAddr,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TimeActive {
     pub start_time: u64,
     pub stop_time: u64,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Bwtype {
     CT,
     AS,
@@ -270,29 +271,42 @@ impl fmt::Display for Bwtype {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct BandwidthInformation {
     pub bwtype: Bwtype,
     pub bandwidth: u64,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Attribute {
     pub name: String,
     pub value: Option<String>,
 }
 
-#[derive(Default, Clone)]
+#[derive(Clone, Debug)]
 pub struct Origin {
     pub user: String,
     pub session_id: u64,
     pub session_version: u64,
     pub nettype: NetType,
     pub addrtype: AddrType,
-    pub unicast_address: String,
+    pub unicast_address: IpAddr,
 }
 
-#[derive(Clone, PartialEq, Eq, Default, Copy)]
+impl Default for Origin {
+    fn default() -> Self {
+        Self {
+            user: Default::default(),
+            session_id: Default::default(),
+            session_version: Default::default(),
+            nettype: Default::default(),
+            addrtype: Default::default(),
+            unicast_address: utils::local_ip::get_local_ip_addr(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Copy)]
 pub enum MediaType {
     #[default]
     Audio,
@@ -316,7 +330,7 @@ impl fmt::Display for MediaType {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub enum SdpTransport {
     UDP,
     RTPAVP,
@@ -339,7 +353,7 @@ impl fmt::Display for SdpTransport {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MediaDescription {
     // m=  (media name and transport address)
     // m=<media> <port>/<number of ports> <proto> <fmt>

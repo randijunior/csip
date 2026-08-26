@@ -157,7 +157,15 @@ impl<'buf> SdpParser<'buf> {
             _ => return Err(ParseSdpError::SdpUnknowAddrType.into()),
         };
         self.handle_ws();
-        let unicast_address = self.scanner.scan_until_any_as_str(b" \t\r\n")?.to_owned();
+        let unicast_address = match self.scanner.scan_until_any_as_str(b" \t\r\n")?.parse() {
+            Ok(ip_addr) => ip_addr,
+            Err(parse_err) => {
+                return Err(ParseSdpError::SyntaxError {
+                    s: format!("{parse_err:?}"),
+                }
+                .into());
+            }
+        };
         self.handle_ws();
 
         Ok(Origin {
@@ -194,7 +202,12 @@ impl<'buf> SdpParser<'buf> {
         self.scanner.advance_n(3);
 
         self.handle_ws();
-        let conection_address = self.read_line()?.to_owned();
+        let conection_address =
+            self.read_line()?
+                .parse()
+                .map_err(|err| ParseSdpError::SyntaxError {
+                    s: format!("Invalid Connection Address: {err:?}"),
+                })?;
         self.handle_ws();
 
         Ok(ConnectionInformation {

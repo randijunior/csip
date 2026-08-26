@@ -52,6 +52,9 @@ pub enum Error {
 
     #[error("error: {0}")]
     MediaError(#[from] media::error::Error),
+
+    #[error("No Media configured on endpoint!")]
+    NoMediaConfigured,
 }
 
 impl Error {

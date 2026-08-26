@@ -1,5 +1,5 @@
 use core::fmt;
-use std::io::{Result as IoResult, Write};
+use std::io::Write;
 use std::net::SocketAddr;
 use std::ops;
 
@@ -95,8 +95,9 @@ impl ops::DerefMut for OutgoingResponse {
 
 impl Encode for OutgoingResponse {
     type Buffer = Bytes;
+    type Error = std::io::Error;
 
-    fn encode(&self) -> IoResult<Self::Buffer> {
+    fn encode(&self) -> Result<Self::Buffer, std::io::Error> {
         let response = &self.response;
         let buf = BytesMut::new();
         let mut writer = buf.writer();
@@ -116,8 +117,9 @@ impl Encode for OutgoingResponse {
 
 impl Encode for OutgoingRequest {
     type Buffer = Bytes;
+    type Error = std::io::Error;
 
-    fn encode(&self) -> IoResult<Self::Buffer> {
+    fn encode(&self) -> Result<Self::Buffer, std::io::Error> {
         let request = &self.request;
         let buf = BytesMut::new();
         let mut writer = buf.writer();
@@ -130,7 +132,7 @@ impl Encode for OutgoingRequest {
     }
 }
 
-fn write_body<W: Write>(writer: &mut W, body: Option<&SipBody>) -> IoResult<()> {
+fn write_body<W: Write>(writer: &mut W, body: Option<&SipBody>) -> std::io::Result<()> {
     const CONTENT_LENGTH: &str = ContentLength::NAME;
     if let Some(body) = body {
         write!(writer, "{CONTENT_LENGTH}: {}\r\n", body.len())?;

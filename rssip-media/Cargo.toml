@@ -7,3 +7,4 @@ edition.workspace = true
 utils.workspace = true
 thiserror.workspace = true
 bytes.workspace = true
+rand.workspace = true

@@ -63,6 +63,7 @@ pub(crate) fn is_valid_port(v: u16) -> bool {
 /// Test utilities
 #[cfg(test)]
 mod test_utils {
+
     use std::str::FromStr;
 
     use bytes::Bytes;

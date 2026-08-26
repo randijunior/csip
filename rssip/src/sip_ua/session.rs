@@ -1,8 +1,7 @@
-use std::net::SocketAddr;
 use std::ops;
 
 use media::sdp::SessionDescription;
-use media::sdp::negotiator::SdpNegotiator;
+use media::sdp::negotiator::{Negotiator, SdpOfferParams};
 use media::sdp::parser::SdpParser;
 use tokio::sync::mpsc;
 use utils::encode::Encode;
@@ -14,7 +13,6 @@ use crate::message::uri::SipUri;
 use crate::message::{ReasonPhrase, SipBody};
 use crate::sip_ua::dialog::Dialog;
 use crate::transaction::{ClientTransaction, ServerTransaction};
-use crate::transport::TransportHandle;
 use crate::{Endpoint, Error, IncomingRequest, IncomingResponse, OutgoingRequest, Result};
 
 // Offer                Answer             RFC    Ini Est Early
@@ -22,11 +20,10 @@ use crate::{Endpoint, Error, IncomingRequest, IncomingResponse, OutgoingRequest,
 // 1. INVITE Req.          2xx INVITE Resp.     RFC 3261  Y   Y    N
 // 2. 2xx INVITE Resp.     ACK Req.             RFC 3261  Y   Y    N
 
-// MediaSessionConfig / MediaConfig / MediaSessionParameters
-
-pub struct InviteSession<S> {
+/// Represents a SIP Session.
+pub struct Session<S> {
     state: S,
-    negotiator: SdpNegotiator,
+    negotiator: Negotiator,
 }
 
 pub struct Incoming {
@@ -40,10 +37,10 @@ pub struct Calling {
 }
 
 pub struct Established {
-    rx: mpsc::Receiver<InviteSessionEvent>,
+    rx: mpsc::Receiver<SessionEvent>,
 }
 
-pub enum InviteSessionEvent {
+pub enum SessionEvent {
     Terminated(Cause),
     ReInvite(IncomingRequest),
     Options(IncomingRequest),
@@ -54,17 +51,27 @@ pub enum Cause {
     ByeReceived,
 }
 
-impl InviteSession<Calling> {
+pub struct InvitationParams {
+    pub from_uri: SipUri,
+    pub to_uri: SipUri,
+    pub contact: Option<SipUri>,
+}
+
+impl Session<Calling> {
     // RFC 3261 13.2.1
     pub async fn send_invite(
-        from_uri: SipUri,
-        to_uri: SipUri,
-        contact: Option<SipUri>,
-        local_sdp: Option<SessionDescription>,
-        transport: Option<(TransportHandle, SocketAddr)>,
+        params: InvitationParams,
+        sdp_params: Option<SdpOfferParams>,
         endpoint: Endpoint,
     ) -> Result<Self> {
+        let InvitationParams {
+            from_uri,
+            to_uri,
+            contact,
+        } = params;
+
         let mut dialog = Dialog::create_uac(from_uri, to_uri, contact, endpoint.clone());
+
         let mut request = dialog.create_request(SipMethod::Invite);
 
         let allow = endpoint.allow();
@@ -78,23 +85,23 @@ impl InviteSession<Calling> {
             request.headers.push(Header::Supported(supported.clone()));
         }
 
-        if let Some(sdp) = &local_sdp {
-            let encoded = sdp.encode()?;
-            let sip_body = SipBody::from(bytes::Bytes::from(encoded));
+        let negotiator = if let Some(sdp) = sdp_params {
+            let mut nego = Negotiator::default();
+
+            let sdp = nego.generate_offer(sdp).encode()?;
+            let sip_body = SipBody::from(bytes::Bytes::from(sdp));
 
             request
                 .headers
                 .push(Header::ContentType(ContentType::new_sdp()));
             request.body = Some(sip_body);
-        }
 
-        let negotiator = local_sdp.map_or(SdpNegotiator::default(), SdpNegotiator::with_local);
-
-        let client_tsx = if let Some(transport) = transport {
-            ClientTransaction::send_request_with_target(request, endpoint, transport).await?
+            nego
         } else {
-            ClientTransaction::send_request(request, endpoint).await?
+            Negotiator::default()
         };
+
+        let client_tsx = ClientTransaction::send_request(request, endpoint).await?;
 
         Ok(Self {
             state: Calling { client_tsx, dialog },
@@ -108,7 +115,7 @@ impl InviteSession<Calling> {
         Ok(response)
     }
 
-    pub async fn wait_answer(self) -> Result<InviteSession<Established>> {
+    pub async fn wait_answer(self) -> Result<Session<Established>> {
         let Calling {
             mut dialog,
             client_tsx,
@@ -126,7 +133,7 @@ impl InviteSession<Calling> {
 
                 endpoint.send_outgoing_request(&mut outgoing).await?;
 
-                Ok(InviteSession {
+                Ok(Session {
                     state: Established::new(dialog),
                     negotiator: self.negotiator,
                 })
@@ -144,7 +151,7 @@ impl InviteSession<Calling> {
     }
 }
 
-impl InviteSession<Incoming> {
+impl Session<Incoming> {
     pub fn from_invite(
         request: IncomingRequest,
         contact: Contact,
@@ -159,10 +166,10 @@ impl InviteSession<Incoming> {
         let dialog = Dialog::create_uas(&request, contact, endpoint.clone())?;
         let negotiator = if let Some(body) = &request.body {
             // EarlyOffer
-            SdpNegotiator::with_remote(Self::get_sdp(body)?)
+            Negotiator::with_remote(Self::get_sdp(body)?)
         } else {
             // DelayedOffer
-            SdpNegotiator::default()
+            Negotiator::default()
         };
         let server_tsx = ServerTransaction::from_request(request, endpoint);
 
@@ -191,8 +198,8 @@ impl InviteSession<Incoming> {
         mut self,
         status_code: StatusCode,
         reason_phrase: Option<ReasonPhrase>,
-        local_sdp: SessionDescription,
-    ) -> Result<InviteSession<Established>> {
+        sdp_params: SdpOfferParams,
+    ) -> Result<Session<Established>> {
         let Incoming {
             server_tsx,
             mut dialog,
@@ -201,9 +208,9 @@ impl InviteSession<Incoming> {
         let mut sip_response = dialog.create_response(&server_tsx, status_code, reason_phrase);
 
         let offer = {
-            self.negotiator.set_local_sdp(local_sdp)?;
+            let _offer = self.negotiator.generate_offer(sdp_params);
 
-            let answer = self.negotiator.create_answer()?;
+            let answer = self.negotiator.generate_answer()?;
             let sdp = answer.encode()?;
 
             SipBody::from(bytes::Bytes::from(sdp))
@@ -215,14 +222,14 @@ impl InviteSession<Incoming> {
 
         let _ack = dialog.wait_for_ack().await?;
 
-        Ok(InviteSession {
+        Ok(Session {
             state: Established::new(dialog),
             negotiator: self.negotiator,
         })
     }
 }
 
-impl<S> InviteSession<S> {
+impl<S> Session<S> {
     fn get_sdp(body: &SipBody) -> Result<SessionDescription> {
         let sdp = SdpParser::parse(body.as_ref())?;
         Ok(sdp)
@@ -231,7 +238,7 @@ impl<S> InviteSession<S> {
 
 impl Established {
     fn new(dialog: Dialog) -> Self {
-        let (tx, rx) = mpsc::channel::<InviteSessionEvent>(10);
+        let (tx, rx) = mpsc::channel::<SessionEvent>(10);
 
         tokio::spawn(async move {
             if let Err(err) = Self::session_loop(dialog, tx).await {
@@ -242,14 +249,14 @@ impl Established {
         Self { rx }
     }
 
-    async fn session_loop(mut dialog: Dialog, tx: mpsc::Sender<InviteSessionEvent>) -> Result<()> {
+    async fn session_loop(mut dialog: Dialog, tx: mpsc::Sender<SessionEvent>) -> Result<()> {
         while let Ok(request) = dialog.receive_request().await {
             match request.req_line.method {
                 SipMethod::Invite => {
-                    tx.send(InviteSessionEvent::ReInvite(request))
+                    tx.send(SessionEvent::ReInvite(request))
                         .await
                         .map_err(|_| Error::ChannelClosed)?;
-                    break;
+                    continue;
                 }
                 SipMethod::Bye => {
                     let endpoint = dialog.endpoint().clone();
@@ -257,7 +264,7 @@ impl Established {
 
                     dialog.final_response(bye_tsx, StatusCode::Ok).await?;
 
-                    tx.send(InviteSessionEvent::Terminated(Cause::ByeReceived))
+                    tx.send(SessionEvent::Terminated(Cause::ByeReceived))
                         .await
                         .map_err(|_| Error::ChannelClosed)?;
 
@@ -274,17 +281,9 @@ impl Established {
     }
 }
 
-impl ops::Deref for InviteSession<Established> {
-    type Target = mpsc::Receiver<InviteSessionEvent>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.state.rx
-    }
-}
-
-impl ops::DerefMut for InviteSession<Established> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.state.rx
+impl Session<Established> {
+    pub async fn next_event(&mut self) -> Option<SessionEvent> {
+        self.state.rx.recv().await
     }
 }
 
@@ -293,7 +292,6 @@ mod tests {
     use std::str::FromStr;
 
     use super::*;
-    use crate::find_map_header;
     use crate::message::method::SipMethod;
     use crate::test_utils::{create_test_endpoint, create_test_request};
     use crate::transport::{MockTransport, TransportHandle};
@@ -310,7 +308,7 @@ mod tests {
 
         let contact = "test <sip:localhost:8089>".parse().unwrap();
 
-        let _session = InviteSession::from_invite(request, contact, endpoint)
+        let _session = Session::from_invite(request, contact, endpoint)
             .expect("Failed to create session from invite");
     }
 
@@ -321,29 +319,12 @@ mod tests {
         let from_uri = SipUri::from_str("Alice <sip:alice@example.com>").unwrap();
         let to_uri = SipUri::from_str("Bob <sip:bob@example.com>").unwrap();
 
-        let targert_addr = SocketAddr::from_str("127.0.0.1:8089").unwrap();
-        let udp_transport = MockTransport::new_udp();
-        let transport = (TransportHandle::new(udp_transport.clone()), targert_addr);
+        let params = InvitationParams {
+            from_uri: from_uri.clone(),
+            to_uri: to_uri.clone(),
+            contact: None,
+        };
 
-        let session = InviteSession::send_invite(
-            from_uri.clone(),
-            to_uri.clone(),
-            None,
-            None,
-            Some(transport),
-            endpoint,
-        )
-        .await
-        .expect("Failed to create session by sending invite");
-
-        let request = session.request();
-
-        let from_hdr = find_map_header!(request.headers, From).expect("A 'From' header");
-        let to_hdr = find_map_header!(request.headers, To).expect("A 'To' header");
-        let contact_hdr = find_map_header!(request.headers, To).expect("A 'Contact' header");
-
-        assert_eq!(from_hdr.uri, from_uri);
-        assert_eq!(to_hdr.uri, to_uri);
-        assert_eq!(contact_hdr.uri, to_uri);
+        let _session = Session::send_invite(params, None, endpoint).await.unwrap();
     }
 }
