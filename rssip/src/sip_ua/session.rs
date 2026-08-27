@@ -57,7 +57,7 @@ pub struct InvitationParams {
 }
 
 impl<S> Session<S> {
-    fn get_sdp(body: &SipBody) -> Result<SessionDescription> {
+    fn parse_sdp(body: &SipBody) -> Result<SessionDescription> {
         let sdp = SdpParser::parse(body.as_ref())?;
         Ok(sdp)
     }
@@ -97,12 +97,12 @@ impl Session<Calling> {
         let mut negotiator = Negotiator::default();
 
         if let Some(params) = &media_params {
-            let local = negotiator.create_offer(params)?;
-            let sdp = local.encode()?;
+            let offer = negotiator.create_offer(params)?;
+            let sdp_str = offer.encode()?;
 
-            negotiator.set_local_offer(local)?;
+            negotiator.set_local_offer(offer)?;
 
-            let sip_body = SipBody::from(bytes::Bytes::from(sdp));
+            let sip_body = SipBody::from(bytes::Bytes::from(sdp_str));
 
             request
                 .headers
@@ -139,7 +139,7 @@ impl Session<Calling> {
             200..=299 => {
                 let ack_body = if let Some(body) = &response.body {
                     let negotiator = &mut self.negotiator;
-                    let sdp = Self::get_sdp(body)?;
+                    let remote = Self::parse_sdp(body)?;
 
                     match negotiator.state() {
                         NegotiatorState::Initial => {
@@ -151,7 +151,7 @@ impl Session<Calling> {
                             let local = negotiator.create_offer(media_params)?;
 
                             negotiator.set_local_offer(local)?;
-                            negotiator.set_remote_offer(sdp)?;
+                            negotiator.set_remote_offer(remote)?;
 
                             let answer = negotiator.create_answer()?;
 
@@ -159,7 +159,7 @@ impl Session<Calling> {
                         }
                         NegotiatorState::LocalOffer => {
                             // This is an answer.
-                            negotiator.process_answer(sdp)?;
+                            negotiator.process_answer(remote)?;
 
                             None
                         }
@@ -211,13 +211,16 @@ impl Session<Incoming> {
             )));
         }
         let dialog = Dialog::create_uas(&request, contact, endpoint.clone())?;
-        let negotiator = if let Some(body) = &request.body {
+
+        let mut negotiator = Negotiator::new();
+
+        if let Some(body) = &request.body {
             // EarlyOffer
-            Negotiator::with_remote(Self::get_sdp(body)?)
-        } else {
-            // DelayedOffer
-            Negotiator::default()
-        };
+            let remote_offer = Self::parse_sdp(body)?;
+
+            negotiator.set_remote_offer(remote_offer)?;
+        }
+
         let server_tsx = ServerTransaction::from_request(request, endpoint);
 
         Ok(Self {
