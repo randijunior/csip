@@ -3,7 +3,6 @@ use std::net::IpAddr;
 
 use crate::error::Error;
 
-pub mod negotiator;
 pub mod parser;
 
 pub type Uri = String;

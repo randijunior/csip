@@ -12,12 +12,12 @@ pub struct Negotiator {
     remote_offer: Option<SessionDescription>,
     local_offer: Option<SessionDescription>,
     answer: Option<SessionDescription>,
-    state: NegotiationState,
+    state: NegotiatorState,
 }
 
 /// SDP Negotiation state.
-#[derive(Default, Debug, PartialEq, Eq)]
-enum NegotiationState {
+#[derive(Default, Debug, PartialEq, Eq, Copy, Clone)]
+pub enum NegotiatorState {
     #[default]
     Initial,
     LocalOffer,
@@ -26,13 +26,13 @@ enum NegotiationState {
     Done,
 }
 
-pub struct SdpOfferParams {
+pub struct MediaParams {
     direction: Direction,
     origin_ip: IpAddr,
-    media_streams: Vec<SdpMediaStream>,
+    media_lines: Vec<MediaLine>,
 }
 
-pub struct SdpMediaStream {
+pub struct MediaLine {
     transport: SdpTransport,
     media_type: MediaType,
     codecs: Vec<Codec>,
@@ -47,7 +47,7 @@ impl Negotiator {
     pub fn with_local(local: SessionDescription) -> Self {
         Self {
             local_offer: Some(local),
-            state: NegotiationState::LocalOffer,
+            state: NegotiatorState::LocalOffer,
             answer: None,
             remote_offer: None,
         }
@@ -56,7 +56,7 @@ impl Negotiator {
     pub fn with_remote(remote: SessionDescription) -> Self {
         Self {
             remote_offer: Some(remote),
-            state: NegotiationState::RemoteOffer,
+            state: NegotiatorState::RemoteOffer,
             answer: None,
             local_offer: None,
         }
@@ -64,8 +64,8 @@ impl Negotiator {
 
     pub fn set_remote_offer(&mut self, remote: SessionDescription) -> Result<()> {
         self.state = match self.state {
-            NegotiationState::Initial => NegotiationState::RemoteOffer,
-            NegotiationState::LocalOffer => NegotiationState::Ready,
+            NegotiatorState::Initial => NegotiatorState::RemoteOffer,
+            NegotiatorState::LocalOffer => NegotiatorState::Ready,
             _ => return Err(Error::ErrInvalidNegoState),
         };
         self.remote_offer = Some(remote);
@@ -74,8 +74,8 @@ impl Negotiator {
 
     pub fn set_local_offer(&mut self, local: SessionDescription) -> Result<()> {
         self.state = match self.state {
-            NegotiationState::Initial => NegotiationState::LocalOffer,
-            NegotiationState::RemoteOffer => NegotiationState::Ready,
+            NegotiatorState::Initial => NegotiatorState::LocalOffer,
+            NegotiatorState::RemoteOffer => NegotiatorState::Ready,
             _ => return Err(Error::ErrInvalidNegoState),
         };
         self.local_offer = Some(local);
@@ -83,25 +83,25 @@ impl Negotiator {
     }
 
     // RFC 3264 5 - Generating the Initial Offer
-    pub fn create_offer(&mut self, params: SdpOfferParams) -> Result<SessionDescription> {
+    pub fn create_offer(&mut self, params: &MediaParams) -> Result<SessionDescription> {
         // the set of media streams and codecs the
         // offerer wishes to use, along with the IP addresses and ports the
         // offerer would like to use to receive the media.
 
         // an SDP message used in the offer/answer model MUST
         // contain exactly one session description.
-        if self.state != NegotiationState::Initial {
+        if self.state != NegotiatorState::Initial {
             return Err(Error::ErrInvalidNegoState);
         }
 
         let mut media: Vec<MediaDescription> = params
-            .media_streams
-            .into_iter()
-            .map(|media_stream| {
+            .media_lines
+            .iter()
+            .map(|media_line| {
                 let mut media_formats = vec![];
                 let mut attributes = vec![];
 
-                for codec in media_stream.codecs.iter() {
+                for codec in media_line.codecs.iter() {
                     match codec.name() {
                         "PCMU" => {
                             attributes.push(Attribute {
@@ -148,9 +148,9 @@ impl Negotiator {
                 }
 
                 MediaDescription {
-                    media_type: media_stream.media_type,
-                    proto: media_stream.transport,
-                    port: media_stream.port,
+                    media_type: media_line.media_type,
+                    proto: media_line.transport,
+                    port: media_line.port,
                     number_of_ports: None,
                     media_formats,
                     title: None,
@@ -221,7 +221,7 @@ impl Negotiator {
 
     // RFC 3264 6 - Generating the Answer
     pub fn create_answer(&mut self) -> Result<&SessionDescription> {
-        if self.state != NegotiationState::Ready {
+        if self.state != NegotiatorState::Ready {
             return Err(Error::ErrInvalidNegoState);
         };
 
@@ -323,7 +323,7 @@ impl Negotiator {
         };
         let answer_ref = &*self.answer.insert(answer);
 
-        self.state = NegotiationState::Done;
+        self.state = NegotiatorState::Done;
 
         Ok(answer_ref)
     }
@@ -337,27 +337,35 @@ impl Negotiator {
         self.local_offer.as_ref()
     }
 
+    pub fn remote_offer(&self) -> Option<&SessionDescription> {
+        self.remote_offer.as_ref()
+    }
+
     pub fn answer(&self) -> Option<&SessionDescription> {
         self.answer.as_ref()
     }
+
+    pub fn state(&self) -> NegotiatorState {
+        self.state
+    }
 }
 
-impl SdpOfferParams {
+impl MediaParams {
     pub fn new(origin_ip: IpAddr, direction: Direction) -> Self {
         Self {
             direction,
             origin_ip,
-            media_streams: vec![],
+            media_lines: vec![],
         }
     }
 
-    pub fn add_media_stream(mut self, stream: SdpMediaStream) -> Self {
-        self.media_streams.push(stream);
+    pub fn add_media_stream(mut self, stream: MediaLine) -> Self {
+        self.media_lines.push(stream);
         self
     }
 }
 
-impl SdpMediaStream {
+impl MediaLine {
     pub fn audio(port: u16) -> Self {
         Self {
             transport: SdpTransport::RTPAVP,
@@ -427,17 +435,17 @@ mod tests {
     fn test_generate_offer() {
         let mut negotiator = Negotiator::new();
 
-        let audio = SdpMediaStream::audio(34391).with_codecs(vec![
+        let audio = MediaLine::audio(34391).with_codecs(vec![
             Codec::ULAW,
             Codec::ALAW,
             Codec::OPUS,
             Codec::TELEPHONE_EVENT,
         ]);
 
-        let offer = SdpOfferParams::new("192.168.178.54".parse().unwrap(), Direction::SendRecv)
+        let offer = MediaParams::new("192.168.178.54".parse().unwrap(), Direction::SendRecv)
             .add_media_stream(audio);
 
-        let offer = negotiator.create_offer(offer).unwrap();
+        let offer = negotiator.create_offer(&offer).unwrap();
 
         println!("{}", offer.encode().unwrap());
     }
