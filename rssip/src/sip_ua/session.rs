@@ -259,7 +259,9 @@ impl Session<Incoming> {
 
         let body = if self.negotiator.remote_offer().is_some() {
             let Some(media_params) = &self.media_params else {
-                todo!()
+                return Err(Error::Custom(
+                    "media_params required to accept a early offer".into(),
+                ));
             };
             let local = self.negotiator.create_offer(media_params)?;
 
