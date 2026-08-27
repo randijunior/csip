@@ -159,8 +159,7 @@ impl Session<Calling> {
                         }
                         NegotiatorState::LocalOffer => {
                             // This is an answer.
-                            negotiator.set_remote_offer(sdp)?;
-                            negotiator.process_answer()?;
+                            negotiator.process_answer(sdp)?;
 
                             None
                         }
