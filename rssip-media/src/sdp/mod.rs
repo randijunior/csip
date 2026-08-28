@@ -1,4 +1,4 @@
-use std::fmt::{self, Formatter, Result as FmtResult};
+use std::fmt::{self, Formatter, Result as FmtResult, Write};
 use std::net::IpAddr;
 
 use crate::error::Error;
@@ -42,21 +42,14 @@ pub struct SessionDescription {
     pub media: Vec<MediaDescription>,
 }
 
-impl utils::encode::Encode for SessionDescription {
-    type Buffer = String;
-    type Error = std::fmt::Error;
-
-    fn encode(&self) -> Result<Self::Buffer, Self::Error> {
-        use std::fmt::Write;
-
-        let mut buff = String::new();
-
+impl fmt::Display for SessionDescription {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { 
         // v=0
-        write!(&mut buff, "v=0\r\n")?;
+        write!(f, "v=0\r\n")?;
 
         // o=<username> <sess-id> <sess-version> <nettype> <addrtype> <unicast-address>
         write!(
-            &mut buff,
+            f,
             "o={} {} {} {} {} {}\r\n",
             self.origin.user,
             self.origin.session_id,
@@ -67,50 +60,50 @@ impl utils::encode::Encode for SessionDescription {
         )?;
 
         // s=<session name>
-        write!(&mut buff, "s={}\r\n", self.session_name)?;
+        write!(f, "s={}\r\n", self.session_name)?;
 
         // i=<session information>
         if let Some(session_information) = &self.session_information {
-            write!(&mut buff, "i={}\r\n", session_information)?;
+            write!(f, "i={}\r\n", session_information)?;
         }
         // u=<uri>
         if let Some(uri) = &self.uri {
-            write!(&mut buff, "u={}\r\n", uri)?;
+            write!(f, "u={}\r\n", uri)?;
         }
         // e=<email-address>
         if let Some(email_address) = &self.email_address {
-            write!(&mut buff, "e={}\r\n", email_address)?;
+            write!(f, "e={}\r\n", email_address)?;
         }
         // p=<phone-number>
         if let Some(phone_number) = &self.phone_number {
-            write!(&mut buff, "p={}\r\n", phone_number)?;
+            write!(f, "p={}\r\n", phone_number)?;
         }
         // c=<nettype> <addrtype> <connection-address>
         if let Some(c) = &self.connection_information {
             write!(
-                &mut buff,
+                f,
                 "c={} {} {}\r\n",
                 c.nettype, c.addrtype, c.conection_address
             )?;
         }
         //  b=<bwtype>:<bandwidth>
         for b in self.bandwidth_information.iter() {
-            write!(&mut buff, "b={}:{}\r\n", b.bwtype, b.bandwidth)?;
+            write!(f, "b={}:{}\r\n", b.bwtype, b.bandwidth)?;
         }
         // t=<start-time> <stop-time>
         for t in self.time.iter() {
             write!(
-                &mut buff,
+                f,
                 "t={} {}\r\n",
                 t.time_active.start_time, t.time_active.stop_time
             )?;
             // r=<repeat interval> <active duration> <offsets from start-time>
             for r in t.repeat_times.iter() {
-                write!(&mut buff, "r={} {}", r.repeat_interval, r.active_duration)?;
+                write!(f, "r={} {}", r.repeat_interval, r.active_duration)?;
                 for offset in r.offsets.iter() {
-                    write!(&mut buff, " {}", offset)?;
+                    write!(f, " {}", offset)?;
                 }
-                write!(&mut buff, "\r\n")?;
+                write!(f, "\r\n")?;
             }
         }
 
@@ -120,35 +113,35 @@ impl utils::encode::Encode for SessionDescription {
                     name,
                     value: Some(v),
                 } => {
-                    write!(&mut buff, "a={}:{}\r\n", name, v)?;
+                    write!(f, "a={}:{}\r\n", name, v)?;
                 }
                 Attribute { name, value: None } => {
-                    write!(&mut buff, "a={}\r\n", name)?;
+                    write!(f, "a={}\r\n", name)?;
                 }
             }
         }
 
         // m=<media> <port> <proto> <fmt> ...
         for m in self.media.iter() {
-            write!(&mut buff, "m={} {}", m.media_type, m.port)?;
+            write!(f, "m={} {}", m.media_type, m.port)?;
             if let Some(n) = m.number_of_ports {
-                write!(&mut buff, "/{}", n)?;
+                write!(f, "/{}", n)?;
             }
-            write!(&mut buff, " {}", m.proto)?;
+            write!(f, " {}", m.proto)?;
 
             for fmt in m.media_formats.iter() {
-                write!(&mut buff, " {}", fmt)?;
+                write!(f, " {}", fmt)?;
             }
-            write!(&mut buff, "\r\n")?;
+            write!(f, "\r\n")?;
 
             if let Some(title) = &m.title {
-                write!(&mut buff, "t={}\r\n", title)?;
+                write!(f, "t={}\r\n", title)?;
             }
 
             // c=* (connection information -- optional if included at session level)
             if let Some(c) = &m.connection_information {
                 write!(
-                    &mut buff,
+                    f,
                     "c={} {} {}\r\n",
                     c.nettype, c.addrtype, c.conection_address
                 )?;
@@ -156,7 +149,7 @@ impl utils::encode::Encode for SessionDescription {
 
             // b=* (zero or more bandwidth information lines)
             for b in m.bandwidth_information.iter() {
-                write!(&mut buff, "b={}:{}\r\n", b.bwtype, b.bandwidth)?;
+                write!(f, "b={}:{}\r\n", b.bwtype, b.bandwidth)?;
             }
 
             // a=* (zero or more media attribute lines)
@@ -166,15 +159,25 @@ impl utils::encode::Encode for SessionDescription {
                         name,
                         value: Some(v),
                     } => {
-                        write!(&mut buff, "a={}:{}\r\n", name, v)?;
+                        write!(f, "a={}:{}\r\n", name, v)?;
                     }
                     Attribute { name, value: None } => {
-                        write!(&mut buff, "a={}\r\n", name)?;
+                        write!(f, "a={}\r\n", name)?;
                     }
                 }
             }
         }
 
+        Ok(())
+    }
+}
+impl utils::encode::Encode for SessionDescription {
+    type Buffer = String;
+    type Error = std::fmt::Error;
+
+    fn encode(&self) -> Result<Self::Buffer, Self::Error> {
+        let mut buff = String::new();
+        write!(buff,"{self}")?;
         Ok(buff)
     }
 }
