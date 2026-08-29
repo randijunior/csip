@@ -1,4 +1,5 @@
-use media::negotiator::{MediaParams, Negotiator, NegotiatorState};
+use media::media::{MediaParams, MediaSession};
+use media::negotiator::{Negotiator, NegotiatorState};
 use media::sdp::SessionDescription;
 use media::sdp::parser::SdpParser;
 use tokio::sync::mpsc;
@@ -43,9 +44,16 @@ pub enum SessionEvent {
     Terminated(Cause),
     ReInvite(IncomingRequest),
     Options(IncomingRequest),
+    Media(MediaEvent)
 }
 
-#[derive(Debug)]
+
+pub enum MediaEvent {
+    RtpReceived(media::rtp::packet::RtpPacket)
+}
+
+
+#[derive(Debug, Clone, Copy)]
 pub enum Cause {
     ByeReceived,
 }
@@ -179,8 +187,12 @@ impl Session<Calling> {
 
                 endpoint.send_outgoing_request(&mut outgoing).await?;
 
+                // Create Media Session Here? Or let to the application user
+                // ned to create UDP server
+                let params = self.media_params.as_ref().unwrap();
+
                 Ok(Session {
-                    state: Established::new(dialog),
+                    state: Established::create(dialog, params).await?,
                     negotiator: self.negotiator,
                     media_params: self.media_params,
                 })
@@ -255,14 +267,16 @@ impl Session<Incoming> {
             mut dialog,
         } = self.state;
 
-        let mut sip_response = dialog.create_response(&server_tsx, status_code, reason_phrase);
-
-        let body = if self.negotiator.remote_offer().is_some() {
-            let Some(media_params) = &self.media_params else {
+        let Some(media_params) = &self.media_params else {
                 return Err(Error::Custom(
                     "media_params required to accept a early offer".into(),
                 ));
-            };
+        };
+
+        let mut sip_response = dialog.create_response(&server_tsx, status_code, reason_phrase);
+
+        let body = if self.negotiator.remote_offer().is_some() {
+
             let local = self.negotiator.create_offer(media_params)?;
 
             self.negotiator.set_local_offer(local)?;
@@ -280,28 +294,30 @@ impl Session<Incoming> {
 
         let _ack = dialog.wait_for_ack().await?;
 
-        Ok(Session {
-            state: Established::new(dialog),
-            negotiator: self.negotiator,
-            media_params: self.media_params,
-        })
+
+         Ok(Session {
+             state: Established::create(dialog, media_params).await?,
+             negotiator: self.negotiator,
+             media_params: self.media_params,
+         })
     }
 }
 
 impl Established {
-    fn new(dialog: Dialog) -> Self {
-        let (tx, rx) = mpsc::channel::<SessionEvent>(10);
+    async fn create(dialog: Dialog, params: &MediaParams) -> Result<Self> {
+        let media = MediaSession::from_media_params(params).await?;
 
+        let (tx, rx) = mpsc::channel::<SessionEvent>(10);
         tokio::spawn(async move {
-            if let Err(err) = Self::session_loop(dialog, tx).await {
+            if let Err(err) = Self::session_loop(dialog, media,tx).await {
                 log::error!("Failed to handle dialog msg: {}", err);
             }
         });
 
-        Self { rx }
+        Ok(Self { rx })
     }
 
-    async fn session_loop(mut dialog: Dialog, tx: mpsc::Sender<SessionEvent>) -> Result<()> {
+    async fn session_loop(mut dialog: Dialog, media: MediaSession, tx: mpsc::Sender<SessionEvent>) -> Result<()> {
         while let Ok(request) = dialog.receive_request().await {
             match request.req_line.method {
                 SipMethod::Invite => {

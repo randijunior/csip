@@ -19,4 +19,7 @@ console-subscriber = {version = "0.4.1", features = ["env-filter"]}
 name = "sipstateless"
 path = "sipstateless.rs"
 
+[[example]]
+name = "accept"
+path = "accept.rs"
 

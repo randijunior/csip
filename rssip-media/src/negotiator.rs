@@ -2,6 +2,7 @@ use std::net::IpAddr;
 
 use crate::codec::Codec;
 use crate::error::{Error, Result};
+use crate::media::MediaParams;
 use crate::sdp::{
     AddrType, Attribute, ConnectionInformation, Direction, MediaDescription, MediaType, NetType,
     Origin, SdpTransport, SessionDescription, TimeActive, TimeDescription,
@@ -24,19 +25,6 @@ pub enum NegotiatorState {
     RemoteOffer,
     Ready,
     Done,
-}
-
-pub struct MediaParams {
-    direction: Direction,
-    origin_ip: IpAddr,
-    media_lines: Vec<MediaLine>,
-}
-
-pub struct MediaLine {
-    transport: SdpTransport,
-    media_type: MediaType,
-    codecs: Vec<Codec>,
-    port: u16,
 }
 
 impl Negotiator {
@@ -90,76 +78,73 @@ impl Negotiator {
 
         // an SDP message used in the offer/answer model MUST
         // contain exactly one session description.
-        if self.state != NegotiatorState::Initial {
+        if !matches!(
+            self.state,
+            NegotiatorState::Initial | NegotiatorState::RemoteOffer
+        ) {
             return Err(Error::ErrInvalidNegoState);
         }
 
-        let mut media: Vec<MediaDescription> = params
-            .media_lines
-            .iter()
-            .map(|media_line| {
-                let mut media_formats = vec![];
-                let mut attributes = vec![];
+        let mut media_formats = vec![];
+        let mut attributes = vec![];
 
-                for codec in media_line.codecs.iter() {
-                    match codec.name() {
-                        "PCMU" => {
-                            attributes.push(Attribute {
-                                name: "rtpmap".to_owned(),
-                                value: Some("0 PCMU/8000".to_owned()),
-                            });
-                        }
-                        "PCMA" => {
-                            attributes.push(Attribute {
-                                name: "rtpmap".to_owned(),
-                                value: Some("8 PCMA/8000".to_owned()),
-                            });
-                        }
-                        "opus" => {
-                            attributes.push(Attribute {
-                                name: "rtpmap".to_owned(),
-                                value: Some("96 opus/48000/2".to_owned()),
-                            });
-                        }
-                        "telephone-event" => {
-                            attributes.push(Attribute {
-                                name: "rtpmap".to_owned(),
-                                value: Some("101 telephone-event/8000".to_owned()),
-                            });
-                            attributes.push(Attribute {
-                                name: "fmtp".to_owned(),
-                                value: Some("101 0-16".to_owned()),
-                            });
-                        }
-                        _ => {
-                            attributes.push(Attribute {
-                                name: "rtpmap".to_owned(),
-                                value: Some(format!(
-                                    "{}/{}/{}/{}/",
-                                    codec.pt(),
-                                    codec.name(),
-                                    codec.clock_rate(),
-                                    codec.channels()
-                                )),
-                            });
-                        }
-                    }
-                    media_formats.push(codec.pt().to_string());
+        for codec in params.codecs.iter() {
+            match codec.name() {
+                "PCMU" => {
+                    attributes.push(Attribute {
+                        name: "rtpmap".to_owned(),
+                        value: Some("0 PCMU/8000".to_owned()),
+                    });
                 }
+                "PCMA" => {
+                    attributes.push(Attribute {
+                        name: "rtpmap".to_owned(),
+                        value: Some("8 PCMA/8000".to_owned()),
+                    });
+                }
+                "opus" => {
+                    attributes.push(Attribute {
+                        name: "rtpmap".to_owned(),
+                        value: Some("96 opus/48000/2".to_owned()),
+                    });
+                }
+                "telephone-event" => {
+                    attributes.push(Attribute {
+                        name: "rtpmap".to_owned(),
+                        value: Some("101 telephone-event/8000".to_owned()),
+                    });
+                    attributes.push(Attribute {
+                        name: "fmtp".to_owned(),
+                        value: Some("101 0-16".to_owned()),
+                    });
+                }
+                _ => {
+                    attributes.push(Attribute {
+                        name: "rtpmap".to_owned(),
+                        value: Some(format!(
+                            "{}/{}/{}/{}/",
+                            codec.pt(),
+                            codec.name(),
+                            codec.clock_rate(),
+                            codec.channels()
+                        )),
+                    });
+                }
+            }
+            media_formats.push(codec.pt().to_string());
+        }
 
-                MediaDescription {
-                    media_type: media_line.media_type,
-                    proto: media_line.transport,
-                    port: media_line.port,
-                    number_of_ports: None,
-                    media_formats,
-                    title: None,
-                    connection_information: None,
-                    bandwidth_information: vec![],
-                    attributes,
-                }
-            })
-            .collect();
+        let mut media = vec![MediaDescription {
+            media_type: params.media_type,
+            proto: params.transport,
+            port: params.port,
+            number_of_ports: None,
+            media_formats,
+            title: None,
+            connection_information: None,
+            bandwidth_information: vec![],
+            attributes,
+        }];
 
         if let Some(m) = media.last_mut() {
             m.attributes.push(Attribute {
@@ -351,41 +336,55 @@ impl Negotiator {
 }
 
 impl MediaParams {
-    pub fn new(origin_ip: IpAddr, direction: Direction) -> Self {
+    pub fn new(
+        origin_ip: IpAddr,
+        media_type: MediaType,
+        port: u16,
+        transport: SdpTransport,
+        direction: Direction,
+    ) -> Self {
         Self {
             direction,
             origin_ip,
-            media_lines: vec![],
+            codecs: vec![],
+            transport,
+            port,
+            media_type,
         }
     }
 
-    pub fn add_media_stream(mut self, stream: MediaLine) -> Self {
-        self.media_lines.push(stream);
-        self
-    }
-}
-
-impl MediaLine {
-    pub fn audio(port: u16) -> Self {
+    pub fn audio(origin_ip: IpAddr, port: u16, direction: Direction) -> Self {
         Self {
+            origin_ip,
             transport: SdpTransport::RTPAVP,
             media_type: MediaType::Audio,
             codecs: vec![],
             port,
+            direction,
         }
     }
-    pub fn video(port: u16) -> Self {
+    pub fn video(origin_ip: IpAddr, port: u16, direction: Direction) -> Self {
         Self {
             transport: SdpTransport::RTPAVP,
             media_type: MediaType::Video,
             codecs: vec![],
             port,
+            direction,
+            origin_ip,
         }
     }
 
     pub fn with_codecs(mut self, codecs: Vec<Codec>) -> Self {
         self.codecs = codecs;
         self
+    }
+
+    pub fn ip(&self) -> IpAddr {
+        self.origin_ip
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port
     }
 }
 
@@ -435,15 +434,17 @@ mod tests {
     fn test_generate_offer() {
         let mut negotiator = Negotiator::new();
 
-        let audio = MediaLine::audio(34391).with_codecs(vec![
+        let offer = MediaParams::audio(
+            "192.168.178.54".parse().unwrap(),
+            34391,
+            Direction::SendRecv,
+        )
+        .with_codecs(vec![
             Codec::ULAW,
             Codec::ALAW,
             Codec::OPUS,
             Codec::TELEPHONE_EVENT,
         ]);
-
-        let offer = MediaParams::new("192.168.178.54".parse().unwrap(), Direction::SendRecv)
-            .add_media_stream(audio);
 
         let offer = negotiator.create_offer(&offer).unwrap();
 
