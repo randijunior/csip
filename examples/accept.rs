@@ -1,11 +1,8 @@
 use std::error::Error;
-use std::net::IpAddr;
 
 use rssip::IncomingRequest;
 use rssip::endpoint::{self, Endpoint, ToTake};
-use rssip::media::codec::Codec;
-use rssip::media::media::MediaParams;
-use rssip::media::sdp::Direction;
+use rssip::media::sdp::SessionDescription;
 use rssip::message::SipBody;
 use rssip::message::headers::Contact;
 use rssip::message::method::SipMethod;
@@ -15,32 +12,6 @@ use rssip::sip_ua::session::{Established, MediaEvent, Session, SessionEvent};
 use rssip::transaction::TsxPlugin;
 use tracing::Level;
 use tracing_subscriber::fmt::time::ChronoLocal;
-
-struct Logger;
-
-#[async_trait::async_trait]
-impl endpoint::Plugin for Logger {
-    fn name(&self) -> &'static str {
-        "logger"
-    }
-
-    async fn on_outgoing_response(&self, res: &mut rssip::OutgoingResponse) {
-        println!(
-            "{}{}{}",
-            res.status_line,
-            res.headers,
-            get_body_utf8(&res.body)
-        );
-    }
-    async fn on_incoming_request(&self, req: ToTake<'_, IncomingRequest>, _endpoint: &Endpoint) {
-        println!(
-            "{}{}{}",
-            req.req_line,
-            req.headers,
-            get_body_utf8(&req.body)
-        );
-    }
-}
 
 pub struct Acceptor {
     contact: Contact,
@@ -63,12 +34,9 @@ impl endpoint::Plugin for Acceptor {
 
         session.progress(StatusCode::Trying, None).await.unwrap();
 
-        let media = MediaParams::audio(IpAddr::from([127, 0, 0, 1]), 17258, Direction::SendRecv)
-            .with_codecs(vec![Codec::ULAW, Codec::ALAW, Codec::TELEPHONE_EVENT]);
+        let sdp = SessionDescription::default();
 
-        session.set_media_params(media);
-
-        let session = session.accept(StatusCode::Ok, None).await.unwrap();
+        let session = session.accept(StatusCode::Ok, None, sdp).await.unwrap();
 
         session_evt_loop(session).await;
 
@@ -87,6 +55,24 @@ async fn session_evt_loop(mut session: Session<Established>) {
             SessionEvent::Options(_options) => todo!(),
             SessionEvent::Media(MediaEvent::RtpReceived(_rtp_packet)) => todo!(),
         }
+    }
+}
+
+struct Logger;
+
+#[async_trait::async_trait]
+impl endpoint::Plugin for Logger {
+    fn name(&self) -> &'static str {
+        "logger"
+    }
+
+    async fn on_outgoing_response(&self, res: &mut rssip::OutgoingResponse) {
+        let body_utf8 = get_body_utf8(&res.body);
+        println!("{}{}{}", res.status_line, res.headers, body_utf8);
+    }
+    async fn on_incoming_request(&self, req: ToTake<'_, IncomingRequest>, _endpoint: &Endpoint) {
+        let body_utf8 = get_body_utf8(&req.body);
+        println!("{}{}{}", req.req_line, req.headers, body_utf8);
     }
 }
 

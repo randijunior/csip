@@ -71,7 +71,7 @@ impl Negotiator {
     }
 
     // RFC 3264 5 - Generating the Initial Offer
-    pub fn create_offer(&mut self, params: &MediaParams) -> Result<SessionDescription> {
+    pub fn create_offer(&self, params: &MediaParams) -> Result<SessionDescription> {
         // the set of media streams and codecs the
         // offerer wishes to use, along with the IP addresses and ports the
         // offerer would like to use to receive the media.
@@ -432,9 +432,9 @@ mod tests {
 
     #[test]
     fn test_generate_offer() {
-        let mut negotiator = Negotiator::new();
+        let negotiator = Negotiator::new();
 
-        let offer = MediaParams::audio(
+        let params = MediaParams::audio(
             "192.168.178.54".parse().unwrap(),
             34391,
             Direction::SendRecv,
@@ -446,7 +446,7 @@ mod tests {
             Codec::TELEPHONE_EVENT,
         ]);
 
-        let offer = negotiator.create_offer(&offer).unwrap();
+        let offer = negotiator.create_offer(&params).unwrap();
 
         println!("{}", offer.encode().unwrap());
     }
