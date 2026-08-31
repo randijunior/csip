@@ -320,13 +320,19 @@ impl Negotiator {
             for media_format in &local.media_formats {
                 let payload_type: u8 = media_format.parse::<u8>()?;
 
-                if payload_type < 96 && remote.media_formats.contains(&media_format) {
-                    media_formats.push(media_format.to_owned());
+                if payload_type < 96 {
+                    if remote.media_formats.contains(&media_format) {
+                        media_formats.push(media_format.to_owned());
+                    } else {
+                        // ignoring no matched codec
+                        continue;
+                    }
                 } else {
                     // TODO: dynamic payload type
                     unimplemented!("dynamic payload type");
                 }
             }
+            // TODO: if media format is empty return err?
 
             media.push(MediaDescription {
                 media_formats,
