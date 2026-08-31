@@ -1,5 +1,4 @@
-use media::media::{MediaParams, MediaSession};
-use media::negotiator::{Negotiator, NegotiatorState};
+use media::negotiator::{Negotiator, NegotiatorState, SdpOfferParams};
 use media::sdp::SessionDescription;
 use media::sdp::parser::SdpParser;
 use tokio::sync::mpsc;
@@ -43,14 +42,12 @@ pub enum SessionEvent {
     Terminated(Cause),
     ReInvite(IncomingRequest),
     Options(IncomingRequest),
-    Media(MediaEvent)
+    Media(MediaEvent),
 }
-
 
 pub enum MediaEvent {
-    RtpReceived(media::rtp::packet::RtpPacket)
+    RtpReceived(media::rtp::packet::RtpPacket),
 }
-
 
 #[derive(Debug, Clone, Copy)]
 pub enum Cause {
@@ -61,6 +58,7 @@ pub struct InvitationParams {
     pub from_uri: SipUri,
     pub to_uri: SipUri,
     pub contact: Option<SipUri>,
+    pub sdp_params: Option<SdpOfferParams>,
 }
 
 impl<S> Session<S> {
@@ -72,15 +70,12 @@ impl<S> Session<S> {
 
 impl Session<Calling> {
     // RFC 3261 13.2.1
-    pub async fn send_invite(
-        inv_params: InvitationParams,
-        local_offer: Option<SessionDescription>,
-        endpoint: Endpoint,
-    ) -> Result<Self> {
+    pub async fn send_invite(inv_params: InvitationParams, endpoint: Endpoint) -> Result<Self> {
         let InvitationParams {
             from_uri,
             to_uri,
             contact,
+            sdp_params,
         } = inv_params;
 
         let mut dialog = Dialog::create_uac(from_uri, to_uri, contact, endpoint.clone());
@@ -100,9 +95,10 @@ impl Session<Calling> {
 
         let mut negotiator = Negotiator::default();
 
-        if let Some(offer) = local_offer {
+        if let Some(params) = sdp_params {
+            let offer = negotiator.create_offer(params)?;
             let encoded = offer.encode()?;
-            
+
             negotiator.set_local_offer(offer)?;
 
             let sip_body = SipBody::from(bytes::Bytes::from(encoded));
@@ -128,7 +124,10 @@ impl Session<Calling> {
         Ok(response)
     }
 
-    pub async fn receive_answer(mut self, local_offer: Option<SessionDescription>) -> Result<Session<Established>> {
+    pub async fn receive_answer(
+        mut self,
+        offer: Option<SdpOfferParams>,
+    ) -> Result<Session<Established>> {
         let Calling {
             mut dialog,
             client_tsx,
@@ -145,11 +144,13 @@ impl Session<Calling> {
 
                     match negotiator.state() {
                         NegotiatorState::Initial => {
-                            let Some(local) = local_offer else {
+                            let Some(params) = offer else {
                                 return Err(Error::Custom(
                                     "offer required to answer a delayed offer".into(),
                                 ));
                             };
+                            let local = negotiator.create_offer(params)?;
+
                             negotiator.set_local_offer(local)?;
                             negotiator.set_remote_offer(remote)?;
 
@@ -250,7 +251,7 @@ impl Session<Incoming> {
         mut self,
         status_code: StatusCode,
         reason_phrase: Option<ReasonPhrase>,
-        local_offer: SessionDescription
+        sdp_params: SdpOfferParams,
     ) -> Result<Session<Established>> {
         let Incoming {
             server_tsx,
@@ -260,8 +261,9 @@ impl Session<Incoming> {
         let mut sip_response = dialog.create_response(&server_tsx, status_code, reason_phrase);
 
         let body = if self.negotiator.remote_offer().is_some() {
+            let offer = self.negotiator.create_offer(sdp_params)?;
 
-            self.negotiator.set_local_offer(local_offer)?;
+            self.negotiator.set_local_offer(offer)?;
 
             let answer = self.negotiator.create_answer()?;
 
@@ -276,11 +278,10 @@ impl Session<Incoming> {
 
         let _ack = dialog.wait_for_ack().await?;
 
-
-         Ok(Session {
-             state: Established::create(dialog).await?,
-             negotiator: self.negotiator,
-         })
+        Ok(Session {
+            state: Established::create(dialog).await?,
+            negotiator: self.negotiator,
+        })
     }
 }
 
@@ -288,7 +289,7 @@ impl Established {
     async fn create(dialog: Dialog) -> Result<Self> {
         let (tx, rx) = mpsc::channel::<SessionEvent>(10);
         tokio::spawn(async move {
-            if let Err(err) = Self::session_loop(dialog,tx).await {
+            if let Err(err) = Self::session_loop(dialog, tx).await {
                 log::error!("Failed to handle dialog msg: {}", err);
             }
         });
@@ -336,7 +337,11 @@ impl Session<Established> {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
+    use std::net::IpAddr;
+
+    use media::codec::Codec;
+    use media::negotiator::SdpMediaStream;
+    use media::sdp::{Direction, SdpTransport};
 
     use super::*;
     use crate::message::method::SipMethod;
@@ -348,30 +353,66 @@ mod tests {
         create_test_request(SipMethod::Invite, transport)
     }
 
+    fn create_test_inv_params() -> InvitationParams {
+        InvitationParams {
+            from_uri: "Alice <sip:alice@example.com>".parse().unwrap(),
+            to_uri: "Bob <sip:bob@example.com>".parse().unwrap(),
+            contact: None,
+            sdp_params: None,
+        }
+    }
+
     #[tokio::test]
-    async fn test_server_session_without_sdp() {
+    async fn test_server_session_late_offer() {
+        let endpoint = create_test_endpoint().await;
+        let request = create_test_invite();
+        let contact = "test <sip:localhost:8089>".parse().unwrap();
+
+        let _session = Session::from_invite(request, contact, endpoint).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_client_session_late_offer() {
+        let endpoint = create_test_endpoint().await;
+        let params = create_test_inv_params();
+
+        let _session = Session::send_invite(params, endpoint).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_server_session_accept_invite_with_offer() {
         let endpoint = create_test_endpoint().await;
         let request = create_test_invite();
 
         let contact = "test <sip:localhost:8089>".parse().unwrap();
 
-        let _session = Session::from_invite(request, contact, endpoint)
-            .expect("Failed to create session from invite");
-    }
+        let mut session = Session::from_invite(request, contact, endpoint).unwrap();
 
-    #[tokio::test]
-    async fn test_client_session_send_invite_without_sdp() {
-        let endpoint = create_test_endpoint().await;
+        session.progress(StatusCode::Trying, None).await.unwrap();
 
-        let from_uri = SipUri::from_str("Alice <sip:alice@example.com>").unwrap();
-        let to_uri = SipUri::from_str("Bob <sip:bob@example.com>").unwrap();
+        let sdp_params = SdpOfferParams::new(IpAddr::from([127, 0, 0, 1]), Direction::SendRecv)
+            .add_media_stream(
+                SdpMediaStream::audio(34391, SdpTransport::RTPAVP)
+                    .with_codecs(vec![Codec::ULAW, Codec::ALAW]),
+            );
 
-        let params = InvitationParams {
-            from_uri: from_uri.clone(),
-            to_uri: to_uri.clone(),
-            contact: None,
-        };
+        session
+            .accept(StatusCode::Ok, None, sdp_params)
+            .await
+            .unwrap();
 
-        let _session = Session::send_invite(params, None, endpoint).await.unwrap();
+        // let offer = session.create_offer();
+
+        // let offer = session.create_offer(MediaType::Audio, Direction::SendRecv, IpAddr::from([127,0,0,1], S));
+        // let session = session.accept(StatusCode::Ok, None, offer).await.unwrap();
+
+        // If the INVITE request contained an offer, and the UAS had not yet
+        // sent an answer, the 2xx MUST contain an answer.  If the INVITE did
+        // not contain an offer, the 2xx MUST contain an offer if the UAS had
+        // not yet sent an offer.
+
+        // let sdp = SessionDescription::default();
+
+        // let session = session.accept(StatusCode::Ok, None, sdp).await.unwrap();
     }
 }

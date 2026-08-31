@@ -17,23 +17,3 @@ pub struct MediaSession {
 
     // RtpSession
 }
-
-pub struct MediaParams {
-    pub(crate) media_type: MediaType,
-    pub(crate)direction: Direction,
-    pub(crate)origin_ip: IpAddr,
-    pub(crate)transport: SdpTransport,
-    pub(crate)codecs: Vec<Codec>,
-    pub(crate) port: u16,
-}
-
-impl MediaSession {
-    pub async fn from_media_params(media_params: &MediaParams)-> std::io::Result<Self> {
-           let ip = media_params.ip();
-                let port = media_params.port();
-
-                let addr = std::net::SocketAddr::new(ip, port);
-                let udp_sock = tokio::net::UdpSocket::bind(addr).await?;
-        todo!()
-    }
-}

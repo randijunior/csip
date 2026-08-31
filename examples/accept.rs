@@ -2,7 +2,9 @@ use std::error::Error;
 
 use rssip::IncomingRequest;
 use rssip::endpoint::{self, Endpoint, ToTake};
-use rssip::media::sdp::SessionDescription;
+use rssip::media::codec::Codec;
+use rssip::media::negotiator::{SdpMediaStream, SdpOfferParams};
+use rssip::media::sdp::{Direction, SdpTransport};
 use rssip::message::SipBody;
 use rssip::message::headers::Contact;
 use rssip::message::method::SipMethod;
@@ -10,6 +12,7 @@ use rssip::message::status_code::StatusCode;
 use rssip::sip_ua::dialog::DialogPlugin;
 use rssip::sip_ua::session::{Established, MediaEvent, Session, SessionEvent};
 use rssip::transaction::TsxPlugin;
+use rssip::utils::local_ip::get_local_ip_addr;
 use tracing::Level;
 use tracing_subscriber::fmt::time::ChronoLocal;
 
@@ -29,12 +32,16 @@ impl endpoint::Plugin for Acceptor {
         } else {
             return;
         };
-        let mut session =
-            Session::from_invite(request, self.contact.clone(), endpoint.clone()).unwrap();
+        let contact_clone = self.contact.clone();
+
+        let mut session = Session::from_invite(request, contact_clone, endpoint.clone()).unwrap();
 
         session.progress(StatusCode::Trying, None).await.unwrap();
 
-        let sdp = SessionDescription::default();
+        let sdp = SdpOfferParams::new(get_local_ip_addr(), Direction::SendRecv).add_media_stream(
+            SdpMediaStream::audio(34391, SdpTransport::RTPAVP)
+                .with_codecs(vec![Codec::ULAW, Codec::ALAW]),
+        );
 
         let session = session.accept(StatusCode::Ok, None, sdp).await.unwrap();
 
