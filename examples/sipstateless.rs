@@ -16,17 +16,14 @@ impl endpoint::Plugin for SipStateless {
     }
 
     async fn on_incoming_request(&self, mut req: ToTake<'_, IncomingRequest>, endpoint: &Endpoint) {
-        if req.req_line.method != SipMethod::Ack {
-            let request = req.take();
-
-            let mut response =
-                endpoint.create_outgoing_response(&request, StatusCode::NotImplemented, None);
-
-            endpoint
-                .send_outgoing_response(&mut response)
-                .await
-                .unwrap();
-        }
+        let request = if req.req_line.method != SipMethod::Ack {
+            req.take()
+        } else {
+            return;
+        };
+        let mut res = endpoint.create_outgoing_response(&request, StatusCode::NotImplemented, None);
+        
+        endpoint.send_outgoing_response(&mut res).await.unwrap();
     }
 }
 
