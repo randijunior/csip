@@ -165,10 +165,6 @@ impl Endpoint {
 
     /// Send the request.
     pub async fn send_outgoing_request(&self, request: &mut OutgoingRequest) -> Result<()> {
-        if request.encoded.is_empty() {
-            request.encoded = request.encode()?;
-        }
-
         log::debug!(
             "Sending Request {} to /{}",
             request.request.req_line.method,
@@ -177,6 +173,10 @@ impl Endpoint {
 
         for plugin in self.inner.plugins.plugins() {
             plugin.on_outgoing_request(request).await;
+        }
+
+        if request.encoded.is_empty() {
+            request.encoded = request.encode()?;
         }
 
         if let Err(err) = request
@@ -192,9 +192,6 @@ impl Endpoint {
     }
 
     pub async fn send_outgoing_response(&self, response: &mut OutgoingResponse) -> Result<()> {
-        if response.encoded.is_empty() {
-            response.encoded = response.encode()?;
-        }
         log::debug!(
             "Sending Response {} {} to /{}",
             response.status_line.code.as_u16(),
@@ -204,6 +201,10 @@ impl Endpoint {
 
         for plugin in self.inner.plugins.plugins() {
             plugin.on_outgoing_response(response).await;
+        }
+
+        if response.encoded.is_empty() {
+            response.encoded = response.encode()?;
         }
 
         self.send_response(response).await?;
