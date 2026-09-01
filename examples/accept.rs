@@ -38,7 +38,9 @@ impl endpoint::Plugin for Acceptor {
 
         session.progress(StatusCode::Trying, None).await.unwrap();
 
-        let sdp = SdpOfferParams::new(get_local_ip_addr(), Direction::SendRecv).add_media_stream(
+        let sdp = SdpOfferParams::new(get_local_ip_addr(), Direction::SendRecv);
+        
+        let sdp = sdp.add_media_stream(
             SdpMediaStream::audio(34391, SdpTransport::RTPAVP)
                 .with_codecs(vec![Codec::ULAW, Codec::ALAW]),
         );
@@ -60,7 +62,7 @@ async fn session_evt_loop(mut session: Session<Established>) {
             }
             SessionEvent::ReInvite(_invite) => println!("Reinvite"),
             SessionEvent::Options(_options) => todo!(),
-            SessionEvent::Media(MediaEvent::RtpReceived(_rtp_packet)) => todo!(),
+            SessionEvent::Media(_evt) => todo!(),
         }
     }
 }

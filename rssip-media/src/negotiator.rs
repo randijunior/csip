@@ -354,8 +354,53 @@ impl Negotiator {
     }
 
     // RFC 3264 7 - Offerer Processing of the Answer
-    pub fn process_answer(&mut self, _answer: SessionDescription) -> Result<()> {
-        todo!()
+    pub fn process_answer(&mut self, answer: SessionDescription) -> Result<()> {
+        if self.state != NegotiatorState::LocalOffer {
+            return Err(Error::ErrInvalidNegoState);
+        };
+        // TODO: Return accepted Streams?
+
+        // When the offerer receives the answer, it MAY send media on the
+        // accepted stream(s) (assuming it is listed as sendrecv or recvonly in
+        // the answer).  It MUST send using a media format listed in the answer,
+        // and it SHOULD use the first media format listed in the answer when it
+        // does send.
+
+        // The reason this is a SHOULD, and not a MUST (its also a SHOULD,
+        // and not a MUST, for the answerer), is because there will
+        // oftentimes be a need to change codecs on the fly.  For example,
+        // during silence periods, an agent might like to switch to a comfort
+        // noise codec.  Or, if the user presses a number on the keypad, the
+        // agent might like to send that using RFC 2833 [9].  Congestion
+        // control might necessitate changing to a lower rate codec based on
+        // feedback.
+
+        // The offerer SHOULD send media according to the value of any ptime and
+        // bandwidth attribute in the answer.
+
+        // The offerer MAY immediately cease listening for media formats that
+        // were listed in the initial offer, but not present in the answer.
+        
+        let local_offer = self.local_offer.as_ref().expect("a local offer");
+
+        for (local, remote) in local_offer.media.iter().zip(answer.media.iter()) {
+            // Just check if have matched codecs
+            if local.media_type != remote.media_type {
+                todo!("return err");
+            }
+
+            if local.proto != remote.proto {
+                todo!("return err");
+            }
+
+            if remote.port == 0 || local.port == 0 {
+                continue;
+            }
+        }
+        self.answer = Some(answer);
+        self.state = NegotiatorState::Done;
+
+        Ok(())
     }
 
     pub fn local_offer(&self) -> Option<&SessionDescription> {
@@ -387,6 +432,10 @@ impl SdpOfferParams {
     pub fn add_media_stream(mut self, media_stream: SdpMediaStream) -> Self {
         self.media_streams.push(media_stream);
         self
+    }
+
+    pub fn ip(&self) -> IpAddr {
+        self.origin_ip
     }
 }
 

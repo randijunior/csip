@@ -9,7 +9,7 @@ use crate::message::method::SipMethod;
 use crate::message::status_code::StatusCode;
 use crate::message::uri::SipUri;
 use crate::message::{ReasonPhrase, SipBody};
-use crate::sip_ua::dialog::Dialog;
+use crate::sip_ua::dialog::{Dialog, DialogState};
 use crate::transaction::{ClientTransaction, ServerTransaction};
 use crate::{Endpoint, Error, IncomingRequest, IncomingResponse, OutgoingRequest, Result};
 
@@ -46,7 +46,7 @@ pub enum SessionEvent {
 }
 
 pub enum MediaEvent {
-    RtpReceived(media::rtp::packet::RtpPacket),
+    // RtpSession(RtpSession),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -58,7 +58,7 @@ pub struct InvitationParams {
     pub from_uri: SipUri,
     pub to_uri: SipUri,
     pub contact: Option<SipUri>,
-    pub sdp_params: Option<SdpOfferParams>,
+    pub sdp: Option<SdpOfferParams>,
 }
 
 impl<S> Session<S> {
@@ -75,7 +75,7 @@ impl Session<Calling> {
             from_uri,
             to_uri,
             contact,
-            sdp_params,
+            sdp,
         } = inv_params;
 
         let mut dialog = Dialog::create_uac(from_uri, to_uri, contact, endpoint.clone());
@@ -95,7 +95,7 @@ impl Session<Calling> {
 
         let mut negotiator = Negotiator::default();
 
-        if let Some(params) = sdp_params {
+        if let Some(params) = sdp {
             let offer = negotiator.create_offer(params)?;
             let encoded = offer.encode()?;
 
@@ -183,10 +183,7 @@ impl Session<Calling> {
                 // Create Media Session Here? Or let to the application user
                 // ned to create UDP server
 
-                Ok(Session {
-                    state: Established::create(dialog).await?,
-                    negotiator: self.negotiator,
-                })
+                Ok(Session::estabilish(self.negotiator, dialog))
             }
             // 13.2.2.2 3xx Responses
             300..=399 => todo!(),
@@ -260,41 +257,60 @@ impl Session<Incoming> {
 
         let mut sip_response = dialog.create_response(&server_tsx, status_code, reason_phrase);
 
-        let body = if self.negotiator.remote_offer().is_some() {
-            let offer = self.negotiator.create_offer(sdp_params)?;
+        // If the INVITE request contained an offer, and the UAS had not yet
+        // sent an answer, the 2xx MUST contain an answer.  If the INVITE did
+        // not contain an offer, the 2xx MUST contain an offer if the UAS had
+        // not yet sent an offer.
+        let offer = self.negotiator.create_offer(sdp_params)?;
 
+        let body = if self.negotiator.state() == NegotiatorState::RemoteOffer {
             self.negotiator.set_local_offer(offer)?;
-
             let answer = self.negotiator.create_answer()?;
-
-            SipBody::from(bytes::Bytes::from(answer.encode()?))
+            answer.encode()?
         } else {
-            todo!()
+            let encoded = offer.encode()?;
+            // Must be NegotiatorState::Initial
+            self.negotiator.set_local_offer(offer)?;
+            encoded
         };
 
-        sip_response.body = Some(body);
+        sip_response.body = Some(SipBody::from(bytes::Bytes::from(body)));
 
         server_tsx.send_final_response(sip_response).await?;
 
-        let _ack = dialog.wait_for_ack().await?;
+        let ack = dialog.wait_for_ack().await?;
 
-        Ok(Session {
-            state: Established::create(dialog).await?,
-            negotiator: self.negotiator,
-        })
+        if self.negotiator.state() == NegotiatorState::LocalOffer {
+            let Some(body) = &ack.body else {
+                return Err(Error::Custom("missing answer on ack".into()));
+            };
+            let answer = Self::parse_sdp(body)?;
+            self.negotiator.process_answer(answer)?;
+        }
+
+        Ok(Session::estabilish(self.negotiator, dialog))
     }
 }
 
-impl Established {
-    async fn create(dialog: Dialog) -> Result<Self> {
+impl Session<Established> {
+    fn estabilish(negotiator: Negotiator, dialog: Dialog) -> Self {
+        assert_eq!(dialog.state(), DialogState::Confirmed);
+        assert_eq!(negotiator.state(), NegotiatorState::Done);
+
         let (tx, rx) = mpsc::channel::<SessionEvent>(10);
+
+        // InitMediaSession
+        // InitRtpSession
+        // Need Ip and Port is Optional
+        // Send event to Application?
+
         tokio::spawn(async move {
             if let Err(err) = Self::session_loop(dialog, tx).await {
                 log::error!("Failed to handle dialog msg: {}", err);
             }
         });
 
-        Ok(Self { rx })
+        Self { state: Established { rx } , negotiator }
     }
 
     async fn session_loop(mut dialog: Dialog, tx: mpsc::Sender<SessionEvent>) -> Result<()> {
@@ -327,9 +343,7 @@ impl Established {
 
         Ok(())
     }
-}
 
-impl Session<Established> {
     pub async fn next_event(&mut self) -> Option<SessionEvent> {
         self.state.rx.recv().await
     }
@@ -358,7 +372,7 @@ mod tests {
             from_uri: "Alice <sip:alice@example.com>".parse().unwrap(),
             to_uri: "Bob <sip:bob@example.com>".parse().unwrap(),
             contact: None,
-            sdp_params: None,
+            sdp: None,
         }
     }
 
@@ -390,29 +404,13 @@ mod tests {
 
         session.progress(StatusCode::Trying, None).await.unwrap();
 
-        let sdp_params = SdpOfferParams::new(IpAddr::from([127, 0, 0, 1]), Direction::SendRecv)
-            .add_media_stream(
-                SdpMediaStream::audio(34391, SdpTransport::RTPAVP)
-                    .with_codecs(vec![Codec::ULAW, Codec::ALAW]),
-            );
+        let sdp = SdpOfferParams::new(IpAddr::from([127, 0, 0, 1]), Direction::SendRecv);
 
-        session
-            .accept(StatusCode::Ok, None, sdp_params)
-            .await
-            .unwrap();
+        let sdp = sdp.add_media_stream(
+            SdpMediaStream::audio(34391, SdpTransport::RTPAVP)
+                .with_codecs(vec![Codec::ULAW, Codec::ALAW]),
+        );
 
-        // let offer = session.create_offer();
-
-        // let offer = session.create_offer(MediaType::Audio, Direction::SendRecv, IpAddr::from([127,0,0,1], S));
-        // let session = session.accept(StatusCode::Ok, None, offer).await.unwrap();
-
-        // If the INVITE request contained an offer, and the UAS had not yet
-        // sent an answer, the 2xx MUST contain an answer.  If the INVITE did
-        // not contain an offer, the 2xx MUST contain an offer if the UAS had
-        // not yet sent an offer.
-
-        // let sdp = SessionDescription::default();
-
-        // let session = session.accept(StatusCode::Ok, None, sdp).await.unwrap();
+        let _session = session.accept(StatusCode::Ok, None, sdp).await.unwrap();
     }
 }

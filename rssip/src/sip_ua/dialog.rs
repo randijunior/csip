@@ -364,6 +364,10 @@ impl Dialog {
     pub(crate) fn endpoint(&self) -> &Endpoint {
         &self.endpoint
     }
+    
+    pub(crate) fn state(&self) -> DialogState {
+        self.state
+    }
 }
 
 impl Drop for Dialog {

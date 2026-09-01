@@ -1,7 +1,7 @@
 use std::net::{IpAddr, SocketAddr};
 
 use crate::codec::Codec;
-use crate::sdp::{Direction, MediaType, SdpTransport};
+use crate::sdp::{Direction, MediaType, SdpTransport, SessionDescription};
 
 
 pub struct MediaSession {
