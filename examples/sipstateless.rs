@@ -22,7 +22,7 @@ impl endpoint::Plugin for SipStateless {
             return;
         };
         let mut res = endpoint.create_outgoing_response(&request, StatusCode::NotImplemented, None);
-        
+
         endpoint.send_outgoing_response(&mut res).await.unwrap();
     }
 }

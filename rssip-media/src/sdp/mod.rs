@@ -43,7 +43,7 @@ pub struct SessionDescription {
 }
 
 impl fmt::Display for SessionDescription {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { 
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // v=0
         write!(f, "v=0\r\n")?;
 
@@ -177,7 +177,7 @@ impl utils::encode::Encode for SessionDescription {
 
     fn encode(&self) -> Result<Self::Buffer, Self::Error> {
         let mut buff = String::new();
-        write!(buff,"{self}")?;
+        write!(buff, "{self}")?;
         Ok(buff)
     }
 }

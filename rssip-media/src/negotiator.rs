@@ -380,7 +380,7 @@ impl Negotiator {
 
         // The offerer MAY immediately cease listening for media formats that
         // were listed in the initial offer, but not present in the answer.
-        
+
         let local_offer = self.local_offer.as_ref().expect("a local offer");
 
         for (local, remote) in local_offer.media.iter().zip(answer.media.iter()) {

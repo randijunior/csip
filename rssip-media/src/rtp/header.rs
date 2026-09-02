@@ -7,5 +7,5 @@ pub struct RtpHeader {
     payload_type: u8,
     ssrc: u32,
     csrc: Vec<u32>,
-    timestamp: u32
+    timestamp: u32,
 }

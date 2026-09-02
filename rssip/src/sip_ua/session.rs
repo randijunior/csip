@@ -46,7 +46,7 @@ pub enum SessionEvent {
 }
 
 pub enum MediaEvent {
-    // RtpSession(RtpSession),
+    // RtpSession(media::media::RtpSession),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -183,7 +183,7 @@ impl Session<Calling> {
                 // Create Media Session Here? Or let to the application user
                 // ned to create UDP server
 
-                Ok(Session::estabilish(self.negotiator, dialog))
+                Ok(Session::establish(self.negotiator, dialog))
             }
             // 13.2.2.2 3xx Responses
             300..=399 => todo!(),
@@ -288,21 +288,13 @@ impl Session<Incoming> {
             self.negotiator.process_answer(answer)?;
         }
 
-        Ok(Session::estabilish(self.negotiator, dialog))
+        Ok(Session::establish(self.negotiator, dialog))
     }
 }
 
 impl Session<Established> {
-    fn estabilish(negotiator: Negotiator, dialog: Dialog) -> Self {
-        assert_eq!(dialog.state(), DialogState::Confirmed);
-        assert_eq!(negotiator.state(), NegotiatorState::Done);
-
+    fn establish(negotiator: Negotiator, dialog: Dialog) -> Self {
         let (tx, rx) = mpsc::channel::<SessionEvent>(10);
-
-        // InitMediaSession
-        // InitRtpSession
-        // Need Ip and Port is Optional
-        // Send event to Application?
 
         tokio::spawn(async move {
             if let Err(err) = Self::session_loop(dialog, tx).await {
@@ -310,7 +302,10 @@ impl Session<Established> {
             }
         });
 
-        Self { state: Established { rx } , negotiator }
+        Self {
+            state: Established { rx },
+            negotiator,
+        }
     }
 
     async fn session_loop(mut dialog: Dialog, tx: mpsc::Sender<SessionEvent>) -> Result<()> {

@@ -39,7 +39,7 @@ impl endpoint::Plugin for Acceptor {
         session.progress(StatusCode::Trying, None).await.unwrap();
 
         let sdp = SdpOfferParams::new(get_local_ip_addr(), Direction::SendRecv);
-        
+
         let sdp = sdp.add_media_stream(
             SdpMediaStream::audio(34391, SdpTransport::RTPAVP)
                 .with_codecs(vec![Codec::ULAW, Codec::ALAW]),
