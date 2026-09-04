@@ -12,7 +12,7 @@ use crate::message::method::SipMethod;
 use crate::message::status_code::StatusCode;
 use crate::message::uri::SipUri;
 use crate::message::{ReasonPhrase, SipBody};
-use crate::sip_ua::dialog::{Dialog, DialogState};
+use crate::ua::dialog::{Dialog, DialogState};
 use crate::transaction::{ClientTransaction, ServerTransaction};
 use crate::{Endpoint, Error, IncomingRequest, IncomingResponse, OutgoingRequest, Result};
 

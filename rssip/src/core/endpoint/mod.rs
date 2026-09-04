@@ -22,7 +22,7 @@ use crate::message::headers::{Accept, Allow, Header, Headers, Route, Supported};
 use crate::message::status_code::StatusCode;
 use crate::message::uri::{Host, HostPort, NameAddr, Uri};
 use crate::message::{ReasonPhrase, Request, Response, StatusLine};
-use crate::sip_ua::dialog::DialogPlugin;
+use crate::ua::dialog::DialogPlugin;
 use crate::transaction::TsxPlugin;
 use crate::transport::incoming::{IncomingRequest, IncomingResponse};
 use crate::transport::outgoing::{
