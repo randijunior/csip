@@ -1,4 +1,7 @@
+use std::net::SocketAddr;
+
 use media::negotiator::{Negotiator, NegotiatorState, SdpOfferParams};
+use media::rtp::session::RtpSession;
 use media::sdp::SessionDescription;
 use media::sdp::parser::SdpParser;
 use tokio::sync::mpsc;
@@ -46,7 +49,7 @@ pub enum SessionEvent {
 }
 
 pub enum MediaEvent {
-    // RtpSession(media::media::RtpSession),
+    RtpSession(RtpSession),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -183,7 +186,7 @@ impl Session<Calling> {
                 // Create Media Session Here? Or let to the application user
                 // ned to create UDP server
 
-                Ok(Session::establish(self.negotiator, dialog))
+                Ok(Session::create(self.negotiator, dialog))
             }
             // 13.2.2.2 3xx Responses
             300..=399 => todo!(),
@@ -288,16 +291,33 @@ impl Session<Incoming> {
             self.negotiator.process_answer(answer)?;
         }
 
-        Ok(Session::establish(self.negotiator, dialog))
+        Ok(Session::create(self.negotiator, dialog))
     }
 }
 
 impl Session<Established> {
-    fn establish(negotiator: Negotiator, dialog: Dialog) -> Self {
+    fn create(negotiator: Negotiator, dialog: Dialog) -> Self {
         let (tx, rx) = mpsc::channel::<SessionEvent>(10);
 
+        let sdp = negotiator.local_offer().expect("a offer");
+
+        // accepted stream(s)
+        let rtp_sockets: Vec<SocketAddr> = sdp
+            .media
+            .iter()
+            .map(|media| {
+                let ip = media
+                    .connection_information
+                    .as_ref()
+                    .map(|c| c.conection_address)
+                    .unwrap_or(sdp.origin.unicast_address);
+                SocketAddr::new(ip, media.port)
+                // need codec
+            })
+            .collect();
+
         tokio::spawn(async move {
-            if let Err(err) = Self::session_loop(dialog, tx).await {
+            if let Err(err) = Self::session_loop(dialog, rtp_sockets, tx).await {
                 log::error!("Failed to handle dialog msg: {}", err);
             }
         });
@@ -308,11 +328,24 @@ impl Session<Established> {
         }
     }
 
-    async fn session_loop(mut dialog: Dialog, tx: mpsc::Sender<SessionEvent>) -> Result<()> {
+    async fn session_loop(
+        mut dialog: Dialog,
+        rtp_sockets: Vec<SocketAddr>,
+        session_tx: mpsc::Sender<SessionEvent>,
+    ) -> Result<()> {
+        for rtp_sock in rtp_sockets {
+            let rtp_session = RtpSession::create(rtp_sock).await?;
+            session_tx
+                .send(SessionEvent::Media(MediaEvent::RtpSession(rtp_session)))
+                .await
+                .map_err(|_| Error::ChannelClosed)?;
+        }
+
         while let Ok(request) = dialog.receive_request().await {
             match request.req_line.method {
                 SipMethod::Invite => {
-                    tx.send(SessionEvent::ReInvite(request))
+                    session_tx
+                        .send(SessionEvent::ReInvite(request))
                         .await
                         .map_err(|_| Error::ChannelClosed)?;
                     continue;
@@ -323,7 +356,8 @@ impl Session<Established> {
 
                     dialog.final_response(bye_tsx, StatusCode::Ok).await?;
 
-                    tx.send(SessionEvent::Terminated(Cause::ByeReceived))
+                    session_tx
+                        .send(SessionEvent::Terminated(Cause::ByeReceived))
                         .await
                         .map_err(|_| Error::ChannelClosed)?;
 
@@ -406,6 +440,6 @@ mod tests {
                 .with_codecs(vec![Codec::ULAW, Codec::ALAW]),
         );
 
-        let _session = session.accept(StatusCode::Ok, None, sdp).await.unwrap();
+        let _session = session.accept(StatusCode::Ok,None, sdp).await.unwrap();
     }
 }

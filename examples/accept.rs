@@ -10,7 +10,7 @@ use rssip::message::headers::Contact;
 use rssip::message::method::SipMethod;
 use rssip::message::status_code::StatusCode;
 use rssip::sip_ua::dialog::DialogPlugin;
-use rssip::sip_ua::session::{Established, MediaEvent, Session, SessionEvent};
+use rssip::sip_ua::session::{Established, Session, SessionEvent};
 use rssip::transaction::TsxPlugin;
 use rssip::utils::local_ip::get_local_ip_addr;
 use tracing::Level;
