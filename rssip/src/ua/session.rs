@@ -1,10 +1,7 @@
-use std::net::SocketAddr;
-
 use media::negotiator::{Negotiator, NegotiatorState, SdpOfferParams};
-use media::rtp::session::RtpSession;
 use media::sdp::SessionDescription;
 use media::sdp::parser::SdpParser;
-use tokio::sync::mpsc;
+use media::{MediaEvent, SessionMedia};
 use utils::encode::Encode;
 
 use crate::message::headers::{Contact, ContentType, Header};
@@ -12,8 +9,8 @@ use crate::message::method::SipMethod;
 use crate::message::status_code::StatusCode;
 use crate::message::uri::SipUri;
 use crate::message::{ReasonPhrase, SipBody};
-use crate::ua::dialog::{Dialog, DialogState};
 use crate::transaction::{ClientTransaction, ServerTransaction};
+use crate::ua::dialog::{Dialog, DialogState};
 use crate::{Endpoint, Error, IncomingRequest, IncomingResponse, OutgoingRequest, Result};
 
 // Offer                Answer             RFC    Ini Est Early
@@ -38,7 +35,8 @@ pub struct Calling {
 }
 
 pub struct Established {
-    rx: mpsc::Receiver<SessionEvent>,
+    dialog: Dialog,
+    media: SessionMedia,
 }
 
 pub enum SessionEvent {
@@ -46,10 +44,6 @@ pub enum SessionEvent {
     ReInvite(IncomingRequest),
     Options(IncomingRequest),
     Media(MediaEvent),
-}
-
-pub enum MediaEvent {
-    RtpSession(RtpSession),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -186,7 +180,15 @@ impl Session<Calling> {
                 // Create Media Session Here? Or let to the application user
                 // ned to create UDP server
 
-                Ok(Session::create(self.negotiator, dialog))
+                // accepted stream(s)
+                let sdp = self.negotiator.answer().unwrap();
+
+                let media = SessionMedia::setup(sdp).await?;
+
+                Ok(Session {
+                    state: Established { dialog, media },
+                    negotiator: self.negotiator,
+                })
             }
             // 13.2.2.2 3xx Responses
             300..=399 => todo!(),
@@ -291,90 +293,52 @@ impl Session<Incoming> {
             self.negotiator.process_answer(answer)?;
         }
 
-        Ok(Session::create(self.negotiator, dialog))
+        let sdp = self.negotiator.answer().expect("a offer");
+
+        // accepted stream(s)
+        let media = SessionMedia::setup(sdp).await?;
+
+        Ok(Session {
+            state: Established { dialog, media },
+            negotiator: self.negotiator,
+        })
     }
 }
 
 impl Session<Established> {
-    fn create(negotiator: Negotiator, dialog: Dialog) -> Self {
-        let (tx, rx) = mpsc::channel::<SessionEvent>(10);
+    pub async fn next_event(&mut self) -> Result<SessionEvent> {
+        let Established { dialog, media } = &mut self.state;
 
-        let sdp = negotiator.local_offer().expect("a offer");
+        if dialog.state() == DialogState::Terminated {
+            return Ok(SessionEvent::Terminated(Cause::ByeReceived));
+        }
 
-        // accepted stream(s)
-        let rtp_sockets: Vec<SocketAddr> = sdp
-            .media
-            .iter()
-            .map(|media| {
-                let ip = media
-                    .connection_information
-                    .as_ref()
-                    .map(|c| c.conection_address)
-                    .unwrap_or(sdp.origin.unicast_address);
-                SocketAddr::new(ip, media.port)
-                // need codec
-            })
-            .collect();
-
-        tokio::spawn(async move {
-            if let Err(err) = Self::session_loop(dialog, rtp_sockets, tx).await {
-                log::error!("Failed to handle dialog msg: {}", err);
+        tokio::select! {
+            Ok(media) = media.receive_event() => {
+                unimplemented!()
             }
-        });
+            Ok(request) = dialog.receive_request() => {
+                match request.req_line.method {
+                    SipMethod::Invite => {
+                        return Ok(SessionEvent::ReInvite(request));
+                    }
+                    SipMethod::Bye => {
+                        let endpoint = dialog.endpoint().clone();
+                        let bye_tsx = ServerTransaction::from_request(request, endpoint);
 
-        Self {
-            state: Established { rx },
-            negotiator,
-        }
-    }
+                        dialog.final_response(bye_tsx, StatusCode::Ok).await?;
 
-    async fn session_loop(
-        mut dialog: Dialog,
-        rtp_sockets: Vec<SocketAddr>,
-        session_tx: mpsc::Sender<SessionEvent>,
-    ) -> Result<()> {
-        for rtp_sock in rtp_sockets {
-            let rtp_session = RtpSession::create(rtp_sock).await?;
-            session_tx
-                .send(SessionEvent::Media(MediaEvent::RtpSession(rtp_session)))
-                .await
-                .map_err(|_| Error::ChannelClosed)?;
-        }
+                        dialog.set_state(DialogState::Terminated);
 
-        while let Ok(request) = dialog.receive_request().await {
-            match request.req_line.method {
-                SipMethod::Invite => {
-                    session_tx
-                        .send(SessionEvent::ReInvite(request))
-                        .await
-                        .map_err(|_| Error::ChannelClosed)?;
-                    continue;
-                }
-                SipMethod::Bye => {
-                    let endpoint = dialog.endpoint().clone();
-                    let bye_tsx = ServerTransaction::from_request(request, endpoint);
-
-                    dialog.final_response(bye_tsx, StatusCode::Ok).await?;
-
-                    session_tx
-                        .send(SessionEvent::Terminated(Cause::ByeReceived))
-                        .await
-                        .map_err(|_| Error::ChannelClosed)?;
-
-                    break;
-                }
-                method => {
-                    log::debug!("received request: {} (ignoring)", method);
-                    continue;
+                        return Ok(SessionEvent::Terminated(Cause::ByeReceived))
+                    }
+                    method => {
+                        log::debug!("received request: {} (ignoring)", method);
+                       unimplemented!()
+                    }
                 }
             }
         }
-
-        Ok(())
-    }
-
-    pub async fn next_event(&mut self) -> Option<SessionEvent> {
-        self.state.rx.recv().await
     }
 }
 
@@ -440,6 +404,6 @@ mod tests {
                 .with_codecs(vec![Codec::ULAW, Codec::ALAW]),
         );
 
-        let _session = session.accept(StatusCode::Ok,None, sdp).await.unwrap();
+        let _session = session.accept(StatusCode::Ok, None, sdp).await.unwrap();
     }
 }

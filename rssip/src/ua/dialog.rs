@@ -23,6 +23,7 @@ pub enum DialogState {
     Init,
     Early,
     Confirmed,
+    Terminated
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -367,6 +368,10 @@ impl Dialog {
 
     pub(crate) fn state(&self) -> DialogState {
         self.state
+    }
+
+    pub(crate) fn set_state(&mut self, state: DialogState) {
+        self.state = state;
     }
 }
 
